@@ -1,0 +1,354 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a3 --pto-level=level3 --enable-insert-sync %s | FileCheck %s
+// RUN: ptoas --pto-arch=a5 --pto-level=level3 --enable-insert-sync %s | FileCheck %s
+
+!acc = !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0, compact=0>
+!pool = !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=384, v_row=64, v_col=384, blayout=col_major, slayout=row_major, fractal=1024, pad=0, compact=0>
+!wide = !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=256, v_row=64, v_col=256, blayout=col_major, slayout=row_major, fractal=1024, pad=0, compact=0>
+!left = !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0, compact=0>
+!right = !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0, compact=0>
+!part = !pto.partition_tensor_view<64x128xf32>
+!acc6 = !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0, compact=2>
+!pool7 = !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=384, v_row=64, v_col=384, blayout=col_major, slayout=row_major, fractal=1024, pad=0, compact=2>
+!wide8 = !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=256, v_row=64, v_col=256, blayout=col_major, slayout=row_major, fractal=1024, pad=0, compact=2>
+!acc9 = !pto.tile_buf<loc=acc, dtype=f32, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0, compact=0>
+!left10 = !pto.tile_buf<loc=left, dtype=bf16, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0, compact=0>
+!part11 = !pto.partition_tensor_view<32x128xf32>
+!partial = !pto.tile_buf<loc=acc, dtype=f32, rows=32, cols=384, v_row=32, v_col=384, blayout=col_major, slayout=row_major, fractal=1024, pad=0, compact=0>
+
+module {
+  func.func @acc_columns_equal(%out0: !part, %out1: !part, %dynamic: index, %address: i64) {
+    %zero = arith.constant 0 : i64
+    %base = arith.constant 0 : i64
+    %other = arith.constant 32768 : i64
+    %c0 = arith.constant 0 : index
+    %c16 = arith.constant 16 : index
+    %c96 = arith.constant 96 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %left = pto.alloc_tile addr = %zero : !left
+    %right = pto.alloc_tile addr = %zero : !right
+    %pool = pto.alloc_tile addr = %base : !pool
+    %first = pto.subview %pool[%c0, %c0] sizes [64, 128] : !pool -> !acc
+    %second = pto.subview %pool[%c0, %c0] sizes [64, 128] : !pool -> !acc
+    pto.tmatmul ins(%left, %right : !left, !right) outs(%first : !acc)
+    pto.tstore ins(%first : !acc) outs(%out0 : !part)
+    pto.tmatmul ins(%left, %right : !left, !right) outs(%second : !acc)
+    pto.tstore ins(%second : !acc) outs(%out1 : !part)
+    return
+  }
+
+  func.func @acc_columns_partial_overlap(%out0: !part, %out1: !part, %dynamic: index, %address: i64) {
+    %zero = arith.constant 0 : i64
+    %base = arith.constant 0 : i64
+    %other = arith.constant 32768 : i64
+    %c0 = arith.constant 0 : index
+    %c16 = arith.constant 16 : index
+    %c96 = arith.constant 96 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %left = pto.alloc_tile addr = %zero : !left
+    %right = pto.alloc_tile addr = %zero : !right
+    %pool = pto.alloc_tile addr = %base : !pool
+    %first = pto.subview %pool[%c0, %c0] sizes [64, 128] : !pool -> !acc
+    %second = pto.subview %pool[%c0, %c96] sizes [64, 128] : !pool -> !acc
+    pto.tmatmul ins(%left, %right : !left, !right) outs(%first : !acc)
+    pto.tstore ins(%first : !acc) outs(%out0 : !part)
+    pto.tmatmul ins(%left, %right : !left, !right) outs(%second : !acc)
+    pto.tstore ins(%second : !acc) outs(%out1 : !part)
+    return
+  }
+
+  func.func @acc_columns_nested_overlap(%out0: !part, %out1: !part, %dynamic: index, %address: i64) {
+    %zero = arith.constant 0 : i64
+    %base = arith.constant 0 : i64
+    %other = arith.constant 32768 : i64
+    %c0 = arith.constant 0 : index
+    %c16 = arith.constant 16 : index
+    %c96 = arith.constant 96 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %left = pto.alloc_tile addr = %zero : !left
+    %right = pto.alloc_tile addr = %zero : !right
+    %pool = pto.alloc_tile addr = %base : !pool
+    %first = pto.subview %pool[%c0, %c256] sizes [64, 128] : !pool -> !acc
+    %outer = pto.subview %pool[%c0, %c128] sizes [64, 256] : !pool -> !wide
+    %second = pto.subview %outer[%c0, %c128] sizes [64, 128] : !wide -> !acc
+    pto.tmatmul ins(%left, %right : !left, !right) outs(%first : !acc)
+    pto.tstore ins(%first : !acc) outs(%out0 : !part)
+    pto.tmatmul ins(%left, %right : !left, !right) outs(%second : !acc)
+    pto.tstore ins(%second : !acc) outs(%out1 : !part)
+    return
+  }
+
+  func.func @acc_columns_dynamic_leaf(%out0: !part, %out1: !part, %dynamic: index, %address: i64) {
+    %zero = arith.constant 0 : i64
+    %base = arith.constant 0 : i64
+    %other = arith.constant 32768 : i64
+    %c0 = arith.constant 0 : index
+    %c16 = arith.constant 16 : index
+    %c96 = arith.constant 96 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %left = pto.alloc_tile addr = %zero : !left
+    %right = pto.alloc_tile addr = %zero : !right
+    %pool = pto.alloc_tile addr = %base : !pool
+    %first = pto.subview %pool[%c0, %c0] sizes [64, 128] : !pool -> !acc
+    %second = pto.subview %pool[%c0, %dynamic] sizes [64, 128] : !pool -> !acc
+    pto.tmatmul ins(%left, %right : !left, !right) outs(%first : !acc)
+    pto.tstore ins(%first : !acc) outs(%out0 : !part)
+    pto.tmatmul ins(%left, %right : !left, !right) outs(%second : !acc)
+    pto.tstore ins(%second : !acc) outs(%out1 : !part)
+    return
+  }
+
+  func.func @acc_columns_dynamic_parent(%out0: !part, %out1: !part, %dynamic: index, %address: i64) {
+    %zero = arith.constant 0 : i64
+    %base = arith.constant 0 : i64
+    %other = arith.constant 32768 : i64
+    %c0 = arith.constant 0 : index
+    %c16 = arith.constant 16 : index
+    %c96 = arith.constant 96 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %left = pto.alloc_tile addr = %zero : !left
+    %right = pto.alloc_tile addr = %zero : !right
+    %pool = pto.alloc_tile addr = %base : !pool
+    %first = pto.subview %pool[%c0, %c128] sizes [64, 128] : !pool -> !acc
+    %outer = pto.subview %pool[%c0, %dynamic] sizes [64, 256] : !pool -> !wide
+    %second = pto.subview %outer[%c0, %c0] sizes [64, 128] : !wide -> !acc
+    pto.tmatmul ins(%left, %right : !left, !right) outs(%first : !acc)
+    pto.tstore ins(%first : !acc) outs(%out0 : !part)
+    pto.tmatmul ins(%left, %right : !left, !right) outs(%second : !acc)
+    pto.tstore ins(%second : !acc) outs(%out1 : !part)
+    return
+  }
+
+  func.func @acc_columns_compact(%out0: !part, %out1: !part, %dynamic: index, %address: i64) {
+    %zero = arith.constant 0 : i64
+    %base = arith.constant 0 : i64
+    %other = arith.constant 32768 : i64
+    %c0 = arith.constant 0 : index
+    %c16 = arith.constant 16 : index
+    %c96 = arith.constant 96 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %left = pto.alloc_tile addr = %zero : !left
+    %right = pto.alloc_tile addr = %zero : !right
+    %pool = pto.alloc_tile addr = %base : !pool7
+    %first = pto.subview %pool[%c0, %c0] sizes [64, 128] : !pool7 -> !acc6
+    %second = pto.subview %pool[%c0, %c128] sizes [64, 128] : !pool7 -> !acc6
+    pto.tmatmul ins(%left, %right : !left, !right) outs(%first : !acc6)
+    pto.tstore ins(%first : !acc6) outs(%out0 : !part)
+    pto.tmatmul ins(%left, %right : !left, !right) outs(%second : !acc6)
+    pto.tstore ins(%second : !acc6) outs(%out1 : !part)
+    return
+  }
+
+  func.func @acc_columns_separate_overlap(%out0: !part, %out1: !part, %dynamic: index, %address: i64) {
+    %zero = arith.constant 0 : i64
+    %base = arith.constant 0 : i64
+    %other = arith.constant 16384 : i64
+    %c0 = arith.constant 0 : index
+    %c16 = arith.constant 16 : index
+    %c96 = arith.constant 96 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %left = pto.alloc_tile addr = %zero : !left
+    %right = pto.alloc_tile addr = %zero : !right
+    %first = pto.alloc_tile addr = %base : !acc
+    %second = pto.alloc_tile addr = %other : !acc
+    pto.tmatmul ins(%left, %right : !left, !right) outs(%first : !acc)
+    pto.tstore ins(%first : !acc) outs(%out0 : !part)
+    pto.tmatmul ins(%left, %right : !left, !right) outs(%second : !acc)
+    pto.tstore ins(%second : !acc) outs(%out1 : !part)
+    return
+  }
+
+  func.func @acc_columns_cross_root_overlap(%out0: !part, %out1: !part, %dynamic: index, %address: i64) {
+    %zero = arith.constant 0 : i64
+    %base = arith.constant 0 : i64
+    %other = arith.constant 49152 : i64
+    %c0 = arith.constant 0 : index
+    %c16 = arith.constant 16 : index
+    %c96 = arith.constant 96 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %left = pto.alloc_tile addr = %zero : !left
+    %right = pto.alloc_tile addr = %zero : !right
+    %pool = pto.alloc_tile addr = %base : !pool
+    %first = pto.subview %pool[%c0, %c128] sizes [64, 128] : !pool -> !acc
+    %second = pto.alloc_tile addr = %other : !acc
+    pto.tmatmul ins(%left, %right : !left, !right) outs(%first : !acc)
+    pto.tstore ins(%first : !acc) outs(%out0 : !part)
+    pto.tmatmul ins(%left, %right : !left, !right) outs(%second : !acc)
+    pto.tstore ins(%second : !acc) outs(%out1 : !part)
+    return
+  }
+
+  func.func @acc_columns_unknown_other_root(%out0: !part, %out1: !part, %dynamic: index, %address: i64) {
+    %zero = arith.constant 0 : i64
+    %base = arith.constant 0 : i64
+    %other = arith.constant 32768 : i64
+    %c0 = arith.constant 0 : index
+    %c16 = arith.constant 16 : index
+    %c96 = arith.constant 96 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %left = pto.alloc_tile addr = %zero : !left
+    %right = pto.alloc_tile addr = %zero : !right
+    %first = pto.alloc_tile addr = %base : !acc
+    %second = pto.alloc_tile addr = %address : !acc
+    pto.tmatmul ins(%left, %right : !left, !right) outs(%first : !acc)
+    pto.tstore ins(%first : !acc) outs(%out0 : !part)
+    pto.tmatmul ins(%left, %right : !left, !right) outs(%second : !acc)
+    pto.tstore ins(%second : !acc) outs(%out1 : !part)
+    return
+  }
+
+  func.func @acc_columns_partial_row_parent(%out0: !part11, %out1: !part11, %dynamic: index, %address: i64) {
+    %zero = arith.constant 0 : i64
+    %base = arith.constant 0 : i64
+    %other = arith.constant 32768 : i64
+    %c0 = arith.constant 0 : index
+    %c16 = arith.constant 16 : index
+    %c96 = arith.constant 96 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %left = pto.alloc_tile addr = %zero : !left10
+    %right = pto.alloc_tile addr = %zero : !right
+    %pool = pto.alloc_tile addr = %base : !pool
+    %first = pto.alloc_tile addr = %other : !acc9
+    %outer = pto.subview %pool[%c16, %c0] sizes [32, 384] : !pool -> !partial
+    %second = pto.subview %outer[%c0, %c128] sizes [32, 128] : !partial -> !acc9
+    pto.tmatmul ins(%left, %right : !left10, !right) outs(%first : !acc9)
+    pto.tstore ins(%first : !acc9) outs(%out0 : !part11)
+    pto.tmatmul ins(%left, %right : !left10, !right) outs(%second : !acc9)
+    pto.tstore ins(%second : !acc9) outs(%out1 : !part11)
+    return
+  }
+}
+
+// CHECK-LABEL: AICORE void acc_columns_equal(
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+// CHECK: set_flag(PIPE_FIX, PIPE_M,
+// CHECK: wait_flag(PIPE_FIX, PIPE_M,
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+
+// CHECK-LABEL: AICORE void acc_columns_partial_overlap(
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+// CHECK: set_flag(PIPE_FIX, PIPE_M,
+// CHECK: wait_flag(PIPE_FIX, PIPE_M,
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+
+// CHECK-LABEL: AICORE void acc_columns_nested_overlap(
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+// CHECK: set_flag(PIPE_FIX, PIPE_M,
+// CHECK: wait_flag(PIPE_FIX, PIPE_M,
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+
+// CHECK-LABEL: AICORE void acc_columns_dynamic_leaf(
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+// CHECK: set_flag(PIPE_FIX, PIPE_M,
+// CHECK: wait_flag(PIPE_FIX, PIPE_M,
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+
+// CHECK-LABEL: AICORE void acc_columns_dynamic_parent(
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+// CHECK: set_flag(PIPE_FIX, PIPE_M,
+// CHECK: wait_flag(PIPE_FIX, PIPE_M,
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+
+// CHECK-LABEL: AICORE void acc_columns_compact(
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+// CHECK: set_flag(PIPE_FIX, PIPE_M,
+// CHECK: wait_flag(PIPE_FIX, PIPE_M,
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+
+// CHECK-LABEL: AICORE void acc_columns_separate_overlap(
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+// CHECK: set_flag(PIPE_FIX, PIPE_M,
+// CHECK: wait_flag(PIPE_FIX, PIPE_M,
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+
+// CHECK-LABEL: AICORE void acc_columns_cross_root_overlap(
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+// CHECK: set_flag(PIPE_FIX, PIPE_M,
+// CHECK: wait_flag(PIPE_FIX, PIPE_M,
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+
+// CHECK-LABEL: AICORE void acc_columns_unknown_other_root(
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+// CHECK: set_flag(PIPE_FIX, PIPE_M,
+// CHECK: wait_flag(PIPE_FIX, PIPE_M,
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+
+// CHECK-LABEL: AICORE void acc_columns_partial_row_parent(
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(
+// CHECK: set_flag(PIPE_FIX, PIPE_M,
+// CHECK: wait_flag(PIPE_FIX, PIPE_M,
+// CHECK: TMATMUL(
+// CHECK: set_flag(PIPE_M, PIPE_FIX,
+// CHECK: wait_flag(PIPE_M, PIPE_FIX,
+// CHECK: TSTORE(

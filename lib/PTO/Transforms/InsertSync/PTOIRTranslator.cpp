@@ -24,6 +24,7 @@
 // [P0 新增] 引入副作用接口和 PTO 接口
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
+#include <limits>
 #include <optional>
 
 #define DEBUG_TYPE "pto-ir-translator"
@@ -194,6 +195,125 @@ static int64_t getTileMajorStride(pto::TileBufType type) {
     ++stride;
   }
   return stride;
+}
+
+// A full-height, block-aligned ACC column window is one contiguous byte
+// range. Other boxed rectangles must retain the conservative parent range.
+struct AccColumnRange {
+  uint64_t offset;
+  uint64_t size;
+  uint64_t sourceSize;
+};
+
+static bool hasContiguousAccColumnLayout(pto::TileBufType type) {
+  Type elementType = type.getElementType();
+  return getTileAddressSpace(type) == pto::AddressSpace::ACC &&
+         (elementType.isF32() || elementType.isInteger(32)) &&
+         type.getBLayoutValueI32() == static_cast<int32_t>(pto::BLayout::ColMajor) &&
+         type.getSLayoutValueI32() == static_cast<int32_t>(pto::SLayout::RowMajor) &&
+         type.getSFractalSizeI32() == 1024 &&
+         type.getCompactModeI32() == static_cast<int32_t>(pto::CompactMode::Null);
+}
+
+static bool isAlignedAccColumnWindow(pto::SubViewOp op, int64_t rowOffset,
+                                     int64_t colOffset) {
+  constexpr int64_t blockExtent = 16;
+  auto type = op.getSource().getType();
+  int64_t rows = type.getShape()[0];
+  int64_t cols = type.getShape()[1];
+  int64_t rowSize = cast<IntegerAttr>(op.getSizes()[0]).getInt();
+  int64_t colSize = cast<IntegerAttr>(op.getSizes()[1]).getInt();
+  if (rows <= 0 || cols <= 0 || rows % blockExtent != 0 ||
+      cols % blockExtent != 0 || rowOffset != 0 || rowSize != rows ||
+      colOffset < 0 || colOffset > cols || colSize <= 0 ||
+      colSize > cols - colOffset || colOffset % blockExtent != 0 ||
+      colSize % blockExtent != 0) {
+    return false;
+  }
+  return true;
+}
+
+static std::optional<AccColumnRange>
+getContiguousAccColumnRange(pto::SubViewOp op) {
+  constexpr uint64_t elemBytes = 4;
+  auto type = op.getSource().getType();
+  if (!hasContiguousAccColumnLayout(type) ||
+      !isStaticRank2Shape(type.getShape()) ||
+      op.getOffsets().size() != kTileRank2D ||
+      !op.getSizes() || op.getSizes().size() != kTileRank2D) {
+    return std::nullopt;
+  }
+  IntegerAttr rowAttr, colAttr;
+  if (!matchPattern(op.getOffsets()[0], m_Constant(&rowAttr)) ||
+      !matchPattern(op.getOffsets()[1], m_Constant(&colAttr)) ||
+      !isAlignedAccColumnWindow(op, rowAttr.getInt(), colAttr.getInt())) {
+    return std::nullopt;
+  }
+  int64_t rows = type.getShape()[0];
+  int64_t cols = type.getShape()[1];
+  int64_t colOffset = colAttr.getInt();
+  int64_t colSize = cast<IntegerAttr>(op.getSizes()[1]).getInt();
+  uint64_t maxBytes = std::numeric_limits<uint64_t>::max();
+  if (static_cast<uint64_t>(rows) > maxBytes / elemBytes) {
+    return std::nullopt;
+  }
+  uint64_t columnBytes = static_cast<uint64_t>(rows) * elemBytes;
+  if (static_cast<uint64_t>(cols) > maxBytes / columnBytes) {
+    return std::nullopt;
+  }
+  return AccColumnRange{static_cast<uint64_t>(colOffset) * columnBytes,
+                        static_cast<uint64_t>(colSize) * columnBytes,
+                        static_cast<uint64_t>(cols) * columnBytes};
+}
+
+// A single inherited base can also be a conservative envelope. Only refine
+// sources rooted at an allocation through already-proven column windows;
+// notably, a static child of a dynamic/partial-row view is not an exact view.
+static Value getExactAccColumnRoot(Value source) {
+  while (auto parent = source.getDefiningOp<pto::SubViewOp>()) {
+    if (!getContiguousAccColumnRange(parent)) {
+      return {};
+    }
+    source = parent.getSource();
+  }
+  return source.getDefiningOp<pto::AllocTileOp>() ? source : Value();
+}
+
+static bool canRefineAccColumnParents(
+    const SmallVector<std::unique_ptr<BaseMemInfo>> &parents, Value root,
+    const AccColumnRange &range) {
+  if (!root || parents.empty()) {
+    return false;
+  }
+  for (const auto &parent : parents) {
+    if (!parent || parent->rootBuffer != root ||
+        parent->baseAddresses.size() != 1 ||
+        parent->allocateSize != range.sourceSize ||
+        range.sourceSize > std::numeric_limits<uint64_t>::max() -
+                               parent->baseAddresses.front()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool updateAccColumnAliasBufferInfo(pto::SubViewOp op,
+                                           const AccColumnRange &range,
+                                           Buffer2MemInfoMap &buffer2MemInfoMap) {
+  Value source = op.getSource();
+  auto &parents = buffer2MemInfoMap[source];
+  if (!canRefineAccColumnParents(parents, getExactAccColumnRoot(source), range)) {
+    return false;
+  }
+  Value result = op.getResult();
+  auto &resultInfos = buffer2MemInfoMap[result];
+  for (const auto &parent : buffer2MemInfoMap[source]) {
+    auto info = parent->clone(result);
+    info->baseAddresses = {parent->baseAddresses.front() + range.offset};
+    info->allocateSize = range.size;
+    resultInfos.emplace_back(std::move(info));
+  }
+  return true;
 }
 
 static std::optional<SmallVector<uint64_t>>
@@ -1089,6 +1209,13 @@ void PTOIRTranslator::UpdateTileSubViewAliasBufferInfo(pto::SubViewOp op) {
   auto sourceType = dyn_cast<pto::TileBufType>(source.getType());
   if (!sourceType) {
     UpdateConservativeAliasBufferInfo(result, source);
+    return;
+  }
+
+  if (auto range = getContiguousAccColumnRange(op)) {
+    if (!updateAccColumnAliasBufferInfo(op, *range, buffer2MemInfoMap_)) {
+      UpdateConservativeAliasBufferInfo(result, source);
+    }
     return;
   }
 
