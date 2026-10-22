@@ -1,0 +1,158 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software: you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR CONDITIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
+// See the License in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-pre-assignment-combine -vmi-mask-granularity-assignment -vmi-layout-assignment | FileCheck %s --check-prefix=ASSIGN
+// RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-pre-assignment-combine -vmi-mask-granularity-assignment -vmi-layout-assignment -vmi-to-vpto | FileCheck %s --check-prefix=LOWER --implicit-check-not=pto.vsldb --implicit-check-not=pto.vsel
+
+// A one-lane load followed by an ungrouped broadcast fuses into a scalar
+// group_broadcast_load (num_groups = 1).  Its equal-valued result fills whole
+// physical chunks with one BRC load, so even a result shorter than a physical
+// part -- or a half-part 128-lane 8-bit result carried at lane_stride = 2 --
+// lowers as one broadcast load per chunk.  The compact eight-lane stores keep
+// their packed group_slots carrier, reached through the contiguous carrier
+// bridge.
+
+module {
+  // i8, VL 8: gb(1,4) sub-block scalar broadcast, compact group store.
+  func.func @gbl_scalar_short_i8(%src: !pto.ptr<i8, ub>, %dst: !pto.ptr<i8, ub>) {
+    %c0 = arith.constant 0 : index
+    %lane = pto.vmi.vload %src[%c0]
+        : !pto.ptr<i8, ub> -> !pto.vmi.vreg<1xi8>
+    %r = pto.vmi.vbrc %lane
+        : !pto.vmi.vreg<1xi8> -> !pto.vmi.vreg<8xi8>
+    pto.vmi.vstore %r, %dst[%c0]
+        : !pto.vmi.vreg<8xi8>, !pto.ptr<i8, ub>
+    return
+  }
+
+  // i16, VL 8: gb(1,2) sub-block scalar broadcast.
+  func.func @gbl_scalar_short_i16(%src: !pto.ptr<i16, ub>, %dst: !pto.ptr<i16, ub>) {
+    %c0 = arith.constant 0 : index
+    %lane = pto.vmi.vload %src[%c0]
+        : !pto.ptr<i16, ub> -> !pto.vmi.vreg<1xi16>
+    %r = pto.vmi.vbrc %lane
+        : !pto.vmi.vreg<1xi16> -> !pto.vmi.vreg<8xi16>
+    pto.vmi.vstore %r, %dst[%c0]
+        : !pto.vmi.vreg<8xi16>, !pto.ptr<i16, ub>
+    return
+  }
+
+  // i32, VL 8: gb(1) scalar broadcast whose result does not fill a physical
+  // part, so the per-group merge form has no whole part to assemble.
+  func.func @gbl_scalar_short_i32(%src: !pto.ptr<i32, ub>, %dst: !pto.ptr<i32, ub>) {
+    %c0 = arith.constant 0 : index
+    %lane = pto.vmi.vload %src[%c0]
+        : !pto.ptr<i32, ub> -> !pto.vmi.vreg<1xi32>
+    %r = pto.vmi.vbrc %lane
+        : !pto.vmi.vreg<1xi32> -> !pto.vmi.vreg<8xi32>
+    pto.vmi.vstore %r, %dst[%c0]
+        : !pto.vmi.vreg<8xi32>, !pto.ptr<i32, ub>
+    return
+  }
+
+  // i8, VL 128: a 128-lane 8-bit single-group broadcast is a gb(4) group (half
+  // a 256-lane part); the dense 128-element store prefers the lane_stride = 2
+  // carrier.
+  func.func @gbl_scalar_i8_half_part(%src: !pto.ptr<i8, ub>, %dst: !pto.ptr<i8, ub>) {
+    %c0 = arith.constant 0 : index
+    %lane = pto.vmi.vload %src[%c0]
+        : !pto.ptr<i8, ub> -> !pto.vmi.vreg<1xi8>
+    %r = pto.vmi.vbrc %lane
+        : !pto.vmi.vreg<1xi8> -> !pto.vmi.vreg<128xi8>
+    pto.vmi.vstore %r, %dst[%c0]
+        : !pto.vmi.vreg<128xi8>, !pto.ptr<i8, ub>
+    return
+  }
+
+  // gb(1,2) scalar broadcast whose source_group_stride is dynamic: the single
+  // group's base is offset + stride * 0, so any stride value reads the same
+  // element and the BRC load keeps addressing the original offset.
+  func.func @gbl_scalar_dynamic_stride(%src: !pto.ptr<i16, ub>,
+                                       %dst: !pto.ptr<i16, ub>,
+                                       %stride: index) {
+    %c0 = arith.constant 0 : index
+    %r = pto.vmi.group_broadcast_load %src[%c0], %stride {num_groups = 1 : i64}
+        : !pto.ptr<i16, ub> -> !pto.vmi.vreg<8xi16>
+    pto.vmi.vstore %r, %dst[%c0]
+        : !pto.vmi.vreg<8xi16>, !pto.ptr<i16, ub>
+    return
+  }
+}
+
+// ASSIGN-LABEL: func.func @gbl_scalar_short_i8(
+// ASSIGN: %[[R:.*]] = pto.vmi.group_broadcast_load {{.*}} {num_groups = 1 : i64}
+// ASSIGN-SAME: -> !pto.vmi.vreg<8xi8, #pto.vmi.layout<contiguous>>
+// ASSIGN: pto.vmi.ensure_layout %[[R]]
+// ASSIGN-SAME: -> !pto.vmi.vreg<8xi8, #pto.vmi.layout<num_groups = 8, slots = 8>>
+// ASSIGN: pto.vmi.group_store
+
+// ASSIGN-LABEL: func.func @gbl_scalar_short_i16(
+// ASSIGN: %[[R:.*]] = pto.vmi.group_broadcast_load {{.*}} {num_groups = 1 : i64}
+// ASSIGN-SAME: -> !pto.vmi.vreg<8xi16, #pto.vmi.layout<contiguous>>
+// ASSIGN: pto.vmi.ensure_layout %[[R]]
+// ASSIGN-SAME: -> !pto.vmi.vreg<8xi16, #pto.vmi.layout<num_groups = 8, slots = 8>>
+// ASSIGN: pto.vmi.group_store
+
+// ASSIGN-LABEL: func.func @gbl_scalar_short_i32(
+// ASSIGN: %[[R:.*]] = pto.vmi.group_broadcast_load {{.*}} {num_groups = 1 : i64}
+// ASSIGN-SAME: -> !pto.vmi.vreg<8xi32, #pto.vmi.layout<contiguous>>
+// ASSIGN: pto.vmi.ensure_layout %[[R]]
+// ASSIGN-SAME: -> !pto.vmi.vreg<8xi32, #pto.vmi.layout<num_groups = 8, slots = 8>>
+// ASSIGN: pto.vmi.group_store
+
+// ASSIGN-LABEL: func.func @gbl_scalar_i8_half_part(
+// ASSIGN: %[[R:.*]] = pto.vmi.group_broadcast_load {{.*}} {num_groups = 1 : i64}
+// ASSIGN-SAME: -> !pto.vmi.vreg<128xi8, #pto.vmi.layout<contiguous, lane_stride = 2>>
+// ASSIGN: pto.vmi.store %[[R]]
+
+// ASSIGN-LABEL: func.func @gbl_scalar_dynamic_stride(
+// ASSIGN: %[[R:.*]] = pto.vmi.group_broadcast_load {{.*}}, %[[STRIDE:.*]] {num_groups = 1 : i64}
+// ASSIGN-SAME: -> !pto.vmi.vreg<8xi16, #pto.vmi.layout<contiguous>>
+// ASSIGN: pto.vmi.ensure_layout %[[R]]
+// ASSIGN-SAME: -> !pto.vmi.vreg<8xi16, #pto.vmi.layout<num_groups = 8, slots = 8>>
+// ASSIGN: pto.vmi.group_store
+
+// LOWER-LABEL: func.func @gbl_scalar_short_i8(
+// LOWER-NOT: pto.vlds
+// LOWER: %[[R:.*]] = pto.vlds {{.*}} {dist = "BRC_B8"}
+// LOWER-SAME: -> !pto.vreg<256xi8>
+// LOWER-NOT: pto.vlds
+// LOWER: pto.vst
+// LOWER-NOT: pto.vlds
+
+// LOWER-LABEL: func.func @gbl_scalar_short_i16(
+// LOWER-NOT: pto.vlds
+// LOWER: %[[R:.*]] = pto.vlds {{.*}} {dist = "BRC_B16"}
+// LOWER-SAME: -> !pto.vreg<128xi16>
+// LOWER-NOT: pto.vlds
+// LOWER: pto.vst
+// LOWER-NOT: pto.vlds
+
+// LOWER-LABEL: func.func @gbl_scalar_short_i32(
+// LOWER-NOT: pto.vlds
+// LOWER: %[[R:.*]] = pto.vlds {{.*}} {dist = "BRC_B32"}
+// LOWER-SAME: -> !pto.vreg<64xi32>
+// LOWER-NOT: pto.vlds
+// LOWER: pto.vst
+// LOWER-NOT: pto.vlds
+
+// LOWER-LABEL: func.func @gbl_scalar_i8_half_part(
+// LOWER-NOT: pto.vlds
+// LOWER: %[[R:.*]] = pto.vlds {{.*}} {dist = "BRC_B8"}
+// LOWER-SAME: -> !pto.vreg<256xi8>
+// LOWER-NOT: pto.vlds
+// LOWER: pto.vst
+// LOWER-NOT: pto.vlds
+
+// LOWER-LABEL: func.func @gbl_scalar_dynamic_stride(
+// LOWER-NOT: pto.vlds
+// LOWER: %[[R:.*]] = pto.vlds {{.*}}[%c0] {dist = "BRC_B16"}
+// LOWER-SAME: -> !pto.vreg<128xi16>
+// LOWER-NOT: pto.vlds
+// LOWER: pto.vst
+// LOWER-NOT: pto.vlds

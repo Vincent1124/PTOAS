@@ -370,6 +370,13 @@ static constexpr GroupBroadcastLoadLayoutPattern
         // supports the scalar broadcast-load form synthesized from a one-lane
         // load followed by an ungrouped broadcast.
         {gbFull(), bits<8, 16, 32>(), memAny(), ls(2), G<1>()},
+        // A single-group broadcast is a scalar BRC for the sub-block group
+        // sizes as well: the whole-part form fills every physical chunk with
+        // the one element, so a short gb(1,2)/gb(1,4) result admits the packed
+        // contiguous carrier the same way a gb(1) result does. The group base
+        // never moves (offset + stride * 0), so any stride stays legal.
+        {gb(1, 2), bits<8, 16, 32>(), memAny(), c(), G<1>()},
+        {gb(1, 4), bits<8, 16, 32>(), memAny(), c(), G<1>()},
 };
 
 struct GroupBroadcastLoadDirectPattern {
@@ -414,6 +421,14 @@ static constexpr GroupBroadcastLoadDirectPattern
         // equal-valued result may be carried contiguously with lane_stride = 2.
         {VMIGroupBroadcastLoadDirectKind::BRC, G<1>(), gb(4),
          bits<8, 16, 32>(), memAny(), ls(2)},
+        // Same scalar-BRC argument one block size down: a single-group
+        // gb(1,2)/gb(1,4) broadcast fills each physical chunk with its one
+        // element, so the short 8/16-bit results reach the whole-part BRC form
+        // with a packed contiguous carrier.
+        {VMIGroupBroadcastLoadDirectKind::BRC, G<1>(), gb(1, 2),
+         bits<8, 16, 32>(), memAny(), c()},
+        {VMIGroupBroadcastLoadDirectKind::BRC, G<1>(), gb(1, 4),
+         bits<8, 16, 32>(), memAny(), c()},
 };
 
 struct VselrLayoutPattern {

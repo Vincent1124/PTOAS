@@ -1904,19 +1904,27 @@ private:
       return false;
     }
     // Groups smaller than a physical part are assembled per group; that form
-    // addresses each group base directly and needs no block alignment.  Shapes
-    // this form cannot express (short results, non power-of-two groups) stay
-    // unlowered here and fall through to the group-slot fallback.
+    // addresses each group base directly and needs no block alignment.
+    // Multi-group shapes this form cannot express (short results that do not
+    // fill whole parts, non power-of-two groups) stay unlowered here and fall
+    // through to the group-slot fallback.  A one-group broadcast is a scalar
+    // BRC instead: every physical result chunk holds the same element, so the
+    // whole-part form below fills each chunk correctly no matter how few lanes
+    // the logical result covers or which carrier layout it was assigned; the
+    // per-group merge only exists to combine different groups, which a scalar
+    // broadcast never has.
     if (loadFact.groupSize > 0 && loadFact.groupSize < loadFact.lanesPerPart) {
       FailureOr<SmallVector<Value>> perGroup = lowerPerGroupBRCResult(
           op, rewriter, source, offset, sourceGroupStride, resultVMIType,
           loadFact, resultTypes, numGroups, *dist);
-      if (failed(perGroup)) {
+      if (succeeded(perGroup)) {
+        replaceOpWithFlatConvertedValues(rewriter, op, *perGroup,
+                                         *this->getTypeConverter());
+        return true;
+      }
+      if (numGroups != 1) {
         return false;
       }
-      replaceOpWithFlatConvertedValues(rewriter, op, *perGroup,
-                                       *this->getTypeConverter());
-      return true;
     }
     if (failed(lowerDirectBRC(op, rewriter, source, offset, sourceGroupStride,
                               resultTypes, numGroups, *dist))) {
