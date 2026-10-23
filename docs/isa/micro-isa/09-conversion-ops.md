@@ -85,7 +85,7 @@ for (int i = 0; i < min(N, M); i++)
 | Mode | Description |
 |------|-------------|
 | `R` | Round to nearest, ties to even (default) |
-| `A` | Round away from zero |
+| `A` | Round to nearest, ties away from zero |
 | `F` | Round toward negative infinity (floor) |
 | `C` | Round toward positive infinity (ceil) |
 | `Z` | Round toward zero (truncate) |

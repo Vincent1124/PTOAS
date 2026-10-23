@@ -58,7 +58,7 @@
 
   | Attribute | Values | Valid for | Description |
   |---|---|---|---|
-  | `rounding` | `"R"` (nearest-even), `"A"` (away-from-zero), `"H"` (half-up), `"Z"` (toward-zero); for the `bf16x2→f4x2` contract pair the allowed set is `"R"`,`"A"`,`"F"` (floor), `"C"` (ceil), `"Z"` (toward-zero) — `"H"` is **rejected** | fp narrowing | Rounding mode |
+  | `rounding` | `"R"` (nearest-even), `"A"` (round to nearest, ties away from zero), `"H"` (half-up), `"Z"` (toward-zero); for the `bf16x2→f4x2` contract pair the allowed set is `"R"`,`"A"`,`"F"` (floor), `"C"` (ceil), `"Z"` (toward-zero) — `"H"` is **rejected** | fp narrowing | Rounding mode |
   | `saturate` | `"SAT"`, `"NOSAT"` | required for fp-narrow / int-narrow; for fp→si / fp→ui the requirement follows the vcvt contract's `requiresSat` (e.g. `f16→si8` required, `f16→si32` **forbidden** — no overflow possible; same-width `bf16→f16` required, same-width `f16→bf16` **forbidden**); the `bf16x2→f4x2` narrow has `requiresSat=false` — any `saturate` is **forbidden**; `si32→si8` int-narrow accepts only `"NOSAT"` | For signed destinations, `SAT` clamps to `[min, max]`; for unsigned or signless destinations, it clamps to `[0, max]`. `NOSAT` performs a direct bit truncation of the result representation. |
 
 - **datatypes:** Floating-point source and destination types are
