@@ -243,20 +243,79 @@ def _normalize_vcvt_round_mode(mode, *, context: str):
         raise ValueError(f"{context} does not support rnd {mode!r}; expected one of {expected}")
     return normalized
 
+# AscendC DivAlgo spellings -> generated PTO_DivPrecisionEnum case names. The
+# IR token (0ulp_ftz_true, ...) is what callers write, while dir(enum_cls) only
+# exposes the C++ case names.
+# C++ case name -> IR mnemonic, used only for error messages.
+_DIV_ALGO_CASE_SPELLINGS = {
+    "Intrinsic": "intrinsic",
+    "DiffCompensation": "diff_compensation",
+    "Precision1UlpFtzTrue": "precision_1ulp_ftz_true",
+    "Precision0UlpFtzTrue": "precision_0ulp_ftz_true",
+    "Precision0UlpFtzFalse": "precision_0ulp_ftz_false",
+    "Precision1UlpFtzFalse": "precision_1ulp_ftz_false",
+}
+
+_DIV_ALGO_CASE_NAMES = {
+    # canonical DivAlgo spelling
+    "intrinsic": "Intrinsic",
+    "diffcompensation": "DiffCompensation",
+    "precision1ulpftztrue": "Precision1UlpFtzTrue",
+    "precision0ulpftztrue": "Precision0UlpFtzTrue",
+    "precision0ulpftzfalse": "Precision0UlpFtzFalse",
+    "precision1ulpftzfalse": "Precision1UlpFtzFalse",
+    # accepted shorthands
+    "1ulpftztrue": "Precision1UlpFtzTrue",
+    "0ulpftztrue": "Precision0UlpFtzTrue",
+    "0ulpftzfalse": "Precision0UlpFtzFalse",
+    "1ulpftzfalse": "Precision1UlpFtzFalse",
+    "ulp1ftztrue": "Precision1UlpFtzTrue",
+    "ulp0ftztrue": "Precision0UlpFtzTrue",
+    "ulp0ftzfalse": "Precision0UlpFtzFalse",
+    "ulp1ftzfalse": "Precision1UlpFtzFalse",
+}
+
+
+def _allowed_enum_spellings(enum_cls):
+    """Return the user-facing spellings for an enum, not the C++ case names."""
+    spellings = []
+    for name in dir(enum_cls):
+        if name.startswith("_") or name == "name":
+            continue
+        if not name[:1].isupper():
+            continue
+        spelling = _DIV_ALGO_CASE_SPELLINGS.get(name)
+        spellings.append(spelling if spelling else name)
+    return ", ".join(spellings)
+
+
 def _normalize_enum_attr(value, *, enum_cls, attr_cls, context: str):
     if value is None or isinstance(value, Attribute):
         return value
     token = value if isinstance(value, str) else getattr(value, "name", None)
     if token is not None:
         normalized = "".join(ch for ch in str(token) if ch.isalnum()).lower()
+        alias = _DIV_ALGO_CASE_NAMES.get(normalized)
+        if alias is not None and hasattr(enum_cls, alias):
+            return attr_cls.get(getattr(enum_cls, alias))
         candidates = [
             name for name in dir(enum_cls)
             if not name.startswith("_")
             and "".join(ch for ch in name if ch.isalnum()).lower() == normalized
         ]
+        # ``high_precision`` predates the DivAlgo selector; point the caller at
+        # the family-specific replacement instead of just listing case names.
+        if normalized == "highprecision":
+            raise ValueError(
+                f"{context} no longer accepts 'high_precision'; pick an explicit "
+                f"algorithm: 'precision_0ulp_ftz_true' for the compensated "
+                f"residual search, 'precision_0ulp_ftz_false' for the normalised "
+                f"0-ULP path, or 'precision_1ulp_ftz_false' for the 1-ULP path "
+                f"(see docs/user_guide/08-compute-operations.md)")
         if not candidates:
-            allowed = ", ".join(name for name in dir(enum_cls) if not name.startswith("_"))
-            raise ValueError(f"{context} does not support {value!r}; expected one of {allowed}")
+            raise ValueError(
+                f"{context} does not support {value!r}; expected one of "
+                f"{_allowed_enum_spellings(enum_cls)}")
         value = getattr(enum_cls, candidates[0])
     return attr_cls.get(value)
 

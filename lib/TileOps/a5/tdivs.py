@@ -34,7 +34,7 @@ def _scalar_tile_tile(operand_kinds=(), **_):
 
 def _emit_tdivs_body(src, scalar, dst, traversal, *, scalar_lhs=False):
     dtype = dst.dtype
-    precision_type = pto.get_op_attr("precisionType", "default")
+    precision_type = pto.get_op_attr("precisionType", "intrinsic")
 
     def divide(lhs, rhs, mask):
         return _div(lhs, rhs, dtype, mask, precision_type)

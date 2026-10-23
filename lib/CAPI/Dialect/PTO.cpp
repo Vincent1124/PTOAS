@@ -88,8 +88,12 @@ PTO_ENUM_MIRROR_EQ(RoundMode, TRUNC, MlirPTORoundMode::TRUNC);
 PTO_ENUM_MIRROR_EQ(RoundMode, ODD, MlirPTORoundMode::ODD);
 PTO_ENUM_MIRROR_EQ(RoundMode, CAST_RINT, MlirPTORoundMode::CAST_RINT);
 
-PTO_ENUM_MIRROR_EQ(DivPrecision, Default, MlirPTODivPrecision::Default);
-PTO_ENUM_MIRROR_EQ(DivPrecision, HighPrecision, MlirPTODivPrecision::HighPrecision);
+PTO_ENUM_MIRROR_EQ(DivPrecision, Intrinsic, MlirPTODivPrecision::Intrinsic);
+PTO_ENUM_MIRROR_EQ(DivPrecision, DiffCompensation, MlirPTODivPrecision::DiffCompensation);
+PTO_ENUM_MIRROR_EQ(DivPrecision, Precision1UlpFtzTrue, MlirPTODivPrecision::Precision1UlpFtzTrue);
+PTO_ENUM_MIRROR_EQ(DivPrecision, Precision0UlpFtzTrue, MlirPTODivPrecision::Precision0UlpFtzTrue);
+PTO_ENUM_MIRROR_EQ(DivPrecision, Precision0UlpFtzFalse, MlirPTODivPrecision::Precision0UlpFtzFalse);
+PTO_ENUM_MIRROR_EQ(DivPrecision, Precision1UlpFtzFalse, MlirPTODivPrecision::Precision1UlpFtzFalse);
 PTO_ENUM_MIRROR_EQ(ExpPrecision, Default, MlirPTOExpPrecision::Default);
 PTO_ENUM_MIRROR_EQ(ExpPrecision, HighPrecision, MlirPTOExpPrecision::HighPrecision);
 PTO_ENUM_MIRROR_EQ(LogPrecision, Default, MlirPTOLogPrecision::Default);

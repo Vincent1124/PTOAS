@@ -461,13 +461,7 @@ static std::optional<std::string> getTCvtRoundModeString(pto::TCvtOp op) {
 }
 
 static StringRef getPrecisionTypeString(pto::DivPrecision precision) {
-  switch (precision) {
-  case pto::DivPrecision::Default:
-    return "default";
-  case pto::DivPrecision::HighPrecision:
-    return "high_precision";
-  }
-  llvm_unreachable("unknown DivPrecision");
+  return pto::getDivAlgoToken(precision);
 }
 
 static StringRef getPrecisionTypeString(pto::ExpPrecision precision) {

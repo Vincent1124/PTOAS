@@ -7,56 +7,84 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Register-level residual correction following the unscaled DivPrecisionImpl.
+"""Register-level residual correction: the 21-instruction 0-ULP divide.
 
-The native vdiv_0ulp_ftz_true wrapper is described in PTOAS issue #1312.
-Keep native special results and use fused vmula, not separately rounded mul/add.
+This mirrors the *unscaled* ``DivPrecisionImpl`` -- the form the AscendC SIMD
+dialect emits as ``vdiv_0ulp_ftz_true`` (``tilelang`` ``simd_inst.h``) and the
+form of ``dav_m510``'s reference -- operation for operation:
+
+    z      = vdiv(lhs, rhs)
+    y      = -rhs
+    r      = |lhs*z + y|                        (fused, one rounding)
+    zPre   = bitwise neighbour of z (-1)
+    zNext  = bitwise neighbour of z (+1)
+    rPre   = |lhs*zPre + y|, rNext = |lhs*zNext + y|
+    the candidate with the smallest residual wins; an equal residual keeps the
+    lower neighbour (z - 1), matching the reference ``vcmp_lt`` + ``vsel(z, z,
+    zPre)`` chain -- there is no round-half-even tie breaking
+    special lanes (inf / nan / zero) keep the native value
+
+``dav_3510``'s ``DivPrecisionImpl`` additionally pre-scales both operands by
+``2^k`` when the unbiased exponent of ``lhs`` is below ``-64``. That block is
+deliberately **not** implemented here: it costs 11 extra vector instructions per
+division, and the unscaled sequence matches the AscendC template the ASC backend
+compiles today. Consequence under flush-to-zero: for ``lhs`` exponents below
+about ``-102`` the residual ``|a - q*b| ~ 2^(e0-24)`` can be flushed to zero, the
+tie rule then keeps ``z - 1``, and the result can be one ULP away from the native
+divide. Use ``precision_0ulp_ftz_false`` when that corner has to be exact.
 """
 
 from ptodsl import pto
 
 
 def div_vf32_soft(lhs, rhs, mask):
-    """Preserve native special results and apply the reference f32 correction."""
-    # Compute every intermediate candidate with all lanes enabled.  The
-    # caller's predicate is applied only to the final result so inactive lanes
-    # receive the required deterministic zero value.
-    compute_mask = pto.pset_b32(pto.PAT.ALL)
-    original = pto.vdiv(lhs, rhs, compute_mask)
-    bits = pto.vbitcast(original, pto.ui32)
-    tagged = pto.vor(bits, pto.vbr(pto.ui32(0x80000000)), compute_mask)
-    special = pto.vcmps(tagged, pto.ui32(0xff800000), compute_mask, pto.CmpMode.GE)
-    zero = pto.vcmps(original, pto.f32(0.0), compute_mask, pto.CmpMode.EQ)
-    special = pto.por(special, zero, compute_mask)
-    negative_lhs = pto.vmuls(lhs, pto.f32(-1.0), compute_mask)
+    """Preserve native special results and apply the CANN 0-ULP f32 correction."""
+    quotient = pto.vdiv(lhs, rhs, mask)
+    bits = pto.vbitcast(quotient, pto.ui32)
+    tagged = pto.vor(bits, pto.vbr(pto.ui32(0x80000000)), mask)
+    special = pto.vcmps(tagged, pto.ui32(0xFF800000), mask, pto.CmpMode.GE)
+    zero = pto.vcmps(quotient, pto.f32(0.0), mask, pto.CmpMode.EQ)
+    special = pto.por(special, zero, mask)
+    negative_rhs = pto.vmuls(rhs, pto.f32(-1.0), mask)
+    # Residual |lhs - q*rhs| (CANN's vmula(r=src0, z, y) form), kept fused so the
+    # comparison is not perturbed by an intermediate rounding.
+    residual = pto.vabs(pto.vmula(lhs, quotient, negative_rhs, mask), mask)
     previous = pto.vbitcast(
-        pto.vadds(pto.vbitcast(original, pto.si32), pto.si32(-1), compute_mask), pto.f32
+        pto.vadds(pto.vbitcast(quotient, pto.si32), pto.si32(-1), mask), pto.f32
     )
     following = pto.vbitcast(
-        pto.vadds(pto.vbitcast(original, pto.si32), pto.si32(1), compute_mask), pto.f32
+        pto.vadds(pto.vbitcast(quotient, pto.si32), pto.si32(1), mask), pto.f32
     )
-    one = pto.vbr(pto.ui32(1))
-    odd_z = pto.vand(bits, one, compute_mask)
-    odd_z = pto.vcmp(odd_z, one, compute_mask, pto.CmpMode.EQ)
-    # The quotient error is |rhs * q - lhs|.  Keep this fused so the
-    # residual comparison is not affected by an intermediate rounding.
-    residual = pto.vabs(pto.vmula(negative_lhs, rhs, original, compute_mask), compute_mask)
-    residual_previous = pto.vabs(pto.vmula(negative_lhs, rhs, previous, compute_mask), compute_mask)
-    residual_following = pto.vabs(pto.vmula(negative_lhs, rhs, following, compute_mask), compute_mask)
-    previous_better = pto.vcmp(residual_previous, residual, compute_mask, pto.CmpMode.LT)
-    previous_tie = pto.vcmp(residual, residual_previous, compute_mask, pto.CmpMode.EQ)
-    keep_previous = pto.por(
-        previous_better, pto.pand(previous_tie, odd_z, compute_mask), compute_mask
-    )
-    best = pto.vsel(previous, original, keep_previous)
-    residual = pto.vsel(residual_previous, residual, keep_previous)
-    following_better = pto.vcmp(residual_following, residual, compute_mask, pto.CmpMode.LT)
-    following_tie = pto.vcmp(residual_following, residual, compute_mask, pto.CmpMode.EQ)
-    best_bits = pto.vbitcast(best, pto.ui32)
-    odd_best = pto.vcmp(pto.vand(best_bits, one, compute_mask), one, compute_mask, pto.CmpMode.EQ)
-    improve = pto.por(
-        following_better, pto.pand(following_tie, odd_best, compute_mask), compute_mask
-    )
-    best = pto.vsel(following, best, improve)
-    result = pto.vsel(original, best, special)
-    return pto.vsel(result, pto.vbr(pto.f32(0.0)), mask)
+    residual_previous = pto.vabs(pto.vmula(lhs, previous, negative_rhs, mask), mask)
+    residual_following = pto.vabs(pto.vmula(lhs, following, negative_rhs, mask), mask)
+    # current_better is "the native quotient already beats its lower neighbour".
+    current_better = pto.vcmp(residual, residual_previous, mask, pto.CmpMode.LT)
+    best = pto.vsel(quotient, previous, current_better)
+    residual = pto.vsel(residual, residual_previous, current_better)
+    following_better = pto.vcmp(residual_following, residual, mask, pto.CmpMode.LT)
+    best = pto.vsel(following, best, following_better)
+    return pto.vsel(quotient, best, special)
+
+
+def div_vf32_ulp0_ftz_false(lhs, rhs, mask):
+    """AscendC ``DivAlgo::PRECISION_0ULP_FTZ_FALSE`` for A5 f32.
+
+    Normalises subnormal operands, resolves the quotient with the residual
+    search in the normalised domain, then re-applies the exponent and performs
+    IEEE-754 subnormal/overflow rounding (``DivIEEE754FloatImpl<is0ULP=true>``).
+    """
+    from SoftOps.div_ieee754 import div_vf32_ieee754
+
+    return div_vf32_ieee754(lhs, rhs, mask, ulp0=True)
+
+
+def div_vf32_ulp1_ftz_false(lhs, rhs, mask):
+    """AscendC ``DivAlgo::PRECISION_1ULP_FTZ_FALSE`` for A5 f32.
+
+    Same normalisation and rounding path as the 0-ULP variant but the normalised
+    quotient comes from a single hardware divide
+    (``DivIEEE754FloatImpl<is0ULP=false>``).
+    """
+    from SoftOps.div_ieee754 import div_vf32_ieee754
+
+    return div_vf32_ieee754(lhs, rhs, mask, ulp0=False)

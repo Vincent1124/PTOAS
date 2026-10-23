@@ -6105,7 +6105,11 @@ pto.trowexpanddiv ins(<src0>, <src1>[, <tmp>] : <src0_type>, <src1_type>[, <tmp_
   - `dst`, `src0`, and `src1` must have the same element type.
   - The shared element type must be `f16` or `f32`.
   - `dst` must use row-major layout (`blayout=row_major`).
-- `precisionType = #pto<div_precision high_precision>` requires `tmp`.
+- `precisionType` accepts every `DivAlgo` selector. The software algorithms
+  (`diff_compensation`, `precision_0ulp_ftz_true`, `precision_0ulp_ftz_false`,
+  `precision_1ulp_ftz_false`) expand to the same pointwise sequences as `pto.tdiv`
+  / `pto.tdivs`, so **no `tmp` is required**; the native selectors (`intrinsic`,
+  `precision_1ulp_ftz_true`) map to one vector divide.
 - When `tmp` is present:
   - PTO IR does not require `tmp` to match the shape or valid shape of `src0` / `src1` / `dst`.
   - On A5, `tmp` is accepted as a compatibility placeholder and is not consumed by the current implementation.

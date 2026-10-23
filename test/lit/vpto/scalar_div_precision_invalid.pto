@@ -10,8 +10,8 @@
 
 module attributes {pto.target_arch = "a5"} {
   func.func @invalid(%a: f16, %b: f16) -> f16 {
-    // expected-error @+1 {{high_precision requires scalar f32 operands}}
-    %q = pto.divf %a, %b {precisionType = #pto<div_precision high_precision>} : f16
+    // expected-error @+1 {{precision_0ulp_ftz_true requires scalar f32 operands}}
+    %q = pto.divf %a, %b {precisionType = #pto<div_precision precision_0ulp_ftz_true>} : f16
     return %q : f16
   }
 }
@@ -20,8 +20,8 @@ module attributes {pto.target_arch = "a5"} {
 
 module attributes {pto.target_arch = "a5"} {
   func.func @invalid(%a: f32, %b: f32) -> f32 {
-    // expected-error @+1 {{high_precision does not allow fastmath flags}}
-    %q = pto.divf %a, %b {precisionType = #pto<div_precision high_precision>, fastmath = #pto.fastmath<fast>} : f32
+    // expected-error @+1 {{precision_0ulp_ftz_true does not allow fastmath flags}}
+    %q = pto.divf %a, %b {precisionType = #pto<div_precision precision_0ulp_ftz_true>, fastmath = #pto.fastmath<fast>} : f32
     return %q : f32
   }
 }

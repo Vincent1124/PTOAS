@@ -323,9 +323,18 @@ struct OneToNUnifiedMaskedOpPattern : OneToNOpConversionPattern<SourceOp> {
         rewriter, op->getName().getStringRef(),
         [&](Location loc, Type resultType, ArrayRef<Value> operands,
             Value mask) {
-          return createUnifiedMaskedTarget<
+          FailureOr<Value> created = createUnifiedMaskedTarget<
               TargetOp, unifiedMaskedOperandCount<SourceOp, AdaptorType>()>(
               rewriter, loc, resultType, operands, scalars, mask);
+          // Only Vdiv Op carries an op-level precision selector now; forward it.
+          if (succeeded(created)) {
+            if (auto precision = op->getAttr("precisionType")) {
+              if (Operation *target = created->getDefiningOp()) {
+                target->setAttr("precisionType", precision);
+              }
+            }
+          }
+          return created;
         });
   }
 };

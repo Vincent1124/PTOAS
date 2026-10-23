@@ -18,18 +18,26 @@ LogicalResult VdivOp::verify() {
   if (failed(verifyBinaryVecOp(*this))) {
     return failure();
   }
-  const bool precise = getPrecisionType() == DivPrecision::HighPrecision;
-  if (!precise) {
+  const DivPrecision algo = getPrecisionType();
+  const bool pureSoftware = isSoftwareDivAlgo(algo);
+  if (!pureSoftware && algo != DivPrecision::DiffCompensation) {
+    // The remaining selectors lower to a single native vector divide, so they
+    // accept every element type the op itself supports.
     return success();
   }
+  const std::string name = getDivAlgoToken(algo).str();
   auto type = cast<VRegType>(getResult().getType());
+  if (pureSoftware && !type.getElementType().isF32()) {
+    return emitOpError(name + " requires f32 vector operands");
+  }
   if (!type.getElementType().isF32()) {
-    return emitOpError("high_precision currently requires f32 vector operands");
+    // diff_compensation is compensated only for f32; other types stay native.
+    return success();
   }
   const bool validMask =
       cast<MaskType>(getMask().getType()).getGranularity() == "b32";
   if (!validMask) {
-    return emitOpError("high_precision f32 requires a b32 mask");
+    return emitOpError(name + " f32 requires a b32 mask");
   }
   return success();
 }

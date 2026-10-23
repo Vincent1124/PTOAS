@@ -314,9 +314,12 @@ public:
   LogicalResult matchAndRewrite(BinaryOp op, typename BinaryOp::Adaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     if constexpr (std::is_same_v<BinaryOp, pto::VdivOp>) {
-      const bool precise = op.getPrecisionType() == pto::DivPrecision::HighPrecision;
-      if (precise) {
-        return op.emitOpError("high_precision must be expanded through SoftLib before native emission");
+      auto vregType = dyn_cast<VRegType>(op.getResult().getType());
+      if (vregType && usesSoftwareDivExpansion(op.getPrecisionType(),
+                                               vregType.getElementType())) {
+        return op.emitOpError(
+            "software division algorithms must be expanded through SoftLib "
+            "before native emission");
       }
     }
     Type resultType = this->getTypeConverter()->convertType(op.getResult().getType());

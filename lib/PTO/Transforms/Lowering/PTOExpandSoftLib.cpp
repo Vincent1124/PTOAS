@@ -62,11 +62,19 @@ static bool isSoftLibVdivIntegerVReg(Type type) {
           integer.getWidth() == mlir::pto::kValue32);
 }
 
-// A5 high-precision floating division and integer division use SoftOps.
-// Default floating division remains a native vector instruction.
+// A5 software floating division and integer division use SoftOps.
+// Native floating division remains a native vector instruction.
 static bool isPreciseVdiv(Operation *op) {
   auto div = dyn_cast<VdivOp>(op);
-  return div && div.getPrecisionType() == DivPrecision::HighPrecision;
+  if (!div) {
+    return false;
+  }
+  auto vreg = dyn_cast<VRegType>(div.getResult().getType());
+  if (!vreg) {
+    return false;
+  }
+  return usesSoftwareDivExpansion(div.getPrecisionType(),
+                                  vreg.getElementType());
 }
 
 static bool isIntegerVdiv(Operation *op) {
@@ -276,10 +284,14 @@ struct PTOExpandSoftLibPass
                                 const std::shared_ptr<SoftLibService> &service) {
     auto vreg = cast<VRegType>(op.getLhs().getType());
     if (isPreciseVdiv(op)) {
-      std::string specs = "{\"dtype\":\"f32\",\"mask\":\"b32\",\"precision\":\"high_precision\",\"lanes\":";
+      StringRef algo = getDivAlgoToken(op.getPrecisionType());
+      std::string specs = "{\"dtype\":\"f32\",\"mask\":\"b32\",\"precision\":\"";
+      specs += algo.str();
+      specs += "\",\"lanes\":";
       specs += std::to_string(vreg.getElementCount()) + "}";
+      std::string stem = "vdiv_f32_" + algo.str();
       return materializeCall(op, module, context, target, "pto.vdiv", specs,
-                             "vdiv_f32_hp", op->getOperands(), op.getResult(), service);
+                             stem, op->getOperands(), op.getResult(), service);
     }
     std::string stem = "vdiv_" + getIntegerDtype(op) + "_" +
                        std::to_string(vreg.getElementCount());
@@ -292,9 +304,12 @@ struct PTOExpandSoftLibPass
   LogicalResult materializeScalarDiv(
       DivFOp op, ModuleOp module, StringRef target,
       const std::shared_ptr<SoftLibService> &service) {
-    return materializeCall(op, module, getContext(), target, "pto.divf",
-                           "{\"dtype\":\"f32\",\"precision\":\"high_precision\"}",
-                           "div_f32", op->getOperands(), op.getResult(),
+    // Scalar division verifies to intrinsic or precision_0ulp_ftz_true only, so
+    // the token is forwarded rather than assumed.
+    const std::string algo = getDivAlgoToken(op.getPrecisionType()).str();
+    std::string specs = "{\"dtype\":\"f32\",\"precision\":\"" + algo + "\"}";
+    return materializeCall(op, module, getContext(), target, "pto.divf", specs,
+                           "div_f32_" + algo, op->getOperands(), op.getResult(),
                            service);
   }
 
@@ -329,8 +344,7 @@ struct PTOExpandSoftLibPass
 
   static bool isSoftLibCandidate(Operation *op) {
     auto div = dyn_cast<DivFOp>(op);
-    bool preciseDiv =
-        div && div.getPrecisionType() == DivPrecision::HighPrecision;
+    bool preciseDiv = div && isSoftwareDivAlgo(div.getPrecisionType());
     return isa<SinOp, CosOp>(op) || isIntegerVdiv(op) ||
            isPreciseVdiv(op) || preciseDiv;
   }

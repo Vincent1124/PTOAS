@@ -7,7 +7,12 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""PTODSL TileLib template for pto.tcolexpanddiv — default precision only."""
+"""PTODSL TileLib template for pto.tcolexpanddiv.
+
+Every ``DivAlgo`` selector is honoured through the shared dispatch in
+``TileOps.a5.elementwise.div_dispatch``, exactly like ``pto.tdiv``; the
+compensated sequences are pointwise, so no scratch operand is needed.
+"""
 
 from ptodsl import pto
 import ptodsl.tilelib as tilelib

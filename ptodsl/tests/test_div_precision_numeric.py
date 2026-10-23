@@ -103,7 +103,7 @@ def test_materialized_scalar_division_matches_numpy():
     lhs = np.concatenate((lhs, np.repeat(boundaries, boundaries.size))).view(np.float32)
     rhs = np.concatenate((rhs, np.tile(boundaries, boundaries.size))).view(np.float32)
     module, _ = materialize(
-        "a5", "pto.divf", '{"dtype":"f32","precision":"high_precision"}', make_context()
+        "a5", "pto.divf", '{"dtype":"f32","precision":"precision_0ulp_ftz_true"}', make_context()
     )
     block = list(module.body.operations)[0].regions[0].blocks[0]
     with np.errstate(all="ignore"):

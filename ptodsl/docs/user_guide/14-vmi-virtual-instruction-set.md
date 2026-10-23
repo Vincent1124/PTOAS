@@ -451,7 +451,7 @@ operands. They form the arithmetic core of VMI SIMD kernels.
 #### `pto.vmi.vadd(lhs, rhs, mask=None, *, pmode=None) -> VRegType`
 #### `pto.vmi.vsub(lhs, rhs, mask=None, *, pmode=None) -> VRegType`
 #### `pto.vmi.vmul(lhs, rhs, mask=None, *, pmode=None) -> VRegType`
-#### `pto.vmi.vdiv(lhs, rhs, mask=None, *, pmode=None) -> VRegType`
+#### `pto.vmi.vdiv(lhs, rhs, mask=None, *, precision=None, pmode=None) -> VRegType`
 #### `pto.vmi.vmax(lhs, rhs, mask=None, *, pmode=None) -> VRegType`
 #### `pto.vmi.vmin(lhs, rhs, mask=None, *, pmode=None) -> VRegType`
 #### `pto.vmi.vand(lhs, rhs, mask=None, *, pmode=None) -> VRegType`

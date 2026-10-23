@@ -27,6 +27,7 @@ from ptoas.mlir.ir import (
 )
 
 from ._ops_common import _validate_reduction_element_type
+from ._ops_common import _normalize_enum_attr
 from ._scalar_coercion import coerce_scalar_to_type
 from ._diagnostics import deprecated
 from ._surface_values import _coerce_index_value, _try_get_constant_index, unwrap_surface_value, wrap_surface_value
@@ -961,7 +962,26 @@ class _VMINamespace:
         """Emit VMI vector multiplication, selecting vector or scalar form by type."""
         return _emit_binary_or_vec_scalar("vmul", "vmuls", lhs, rhs, mask, commutative=True, **kw)
 
-    vdiv = staticmethod(lambda lhs, rhs, mask=None, **kw: _emit_binary("vdiv", lhs, rhs, mask, **kw))
+    @staticmethod
+    def vdiv(lhs, rhs, mask=None, *, precision=None, pmode=None, loc=None, ip=None):
+        """Emit VMI division, optionally requesting the A5 correctly-rounded path.
+
+        ``precision`` names the AscendC division algorithm, e.g.
+        ``precision="0ulp_ftz_true"`` (or ``pto.DivPrecision.Precision0UlpFtzTrue``):
+        it annotates the op with ``precisionType`` and the VPTO SoftLib expansion
+        materialises the matching sequence.
+        """
+        result = _emit_binary("vdiv", lhs, rhs, mask, pmode=pmode, loc=loc, ip=ip)
+        if precision is not None:
+            attr = _normalize_enum_attr(
+                precision,
+                enum_cls=_pto.DivPrecision,
+                attr_cls=_pto.DivPrecisionAttr,
+                context="pto.vmi.vdiv precision",
+            )
+            unwrap_surface_value(result).owner.attributes["precisionType"] = attr
+        return result
+
 
     @staticmethod
     def vmax(lhs, rhs, mask=None, **kw):

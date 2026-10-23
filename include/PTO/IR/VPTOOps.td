@@ -2648,7 +2648,7 @@ def PTO_VdivOp : PTO_BinaryVecOp<"vdiv"> {
     PTO_VectorType:$rhs,
     PTO_MaskTypeConstraint:$mask,
     DefaultValuedAttr<PTO_DivPrecisionAttr,
-                     "::mlir::pto::DivPrecision::Default">:$precisionType
+                     "::mlir::pto::DivPrecision::Intrinsic">:$precisionType
   );
 }
 def PTO_VmaxOp : PTO_BinaryVecOp<"vmax">;

@@ -428,12 +428,12 @@ overflow controls are only valid for integer operations; `fastmath` is only
 valid for floating-point operations. `floordiv` and `ceildiv` accept integer
 and index operands only.
 
-For floating-point `pto.div`, pass
-`precision=pto.DivPrecision.HighPrecision` only when the additional
-precision is required. High-precision division is supported only on A5 and is
-expanded through SoftLib. This expansion can substantially increase the
-generated instruction count and execution latency. Ordinary `/` and the
-default `precision` keep the default-precision path.
+For floating-point `pto.div`, `precision="precision_0ulp_ftz_true"` requests the
+correctly rounded A5 scalar path, which is expanded through SoftLib and can
+substantially increase the generated instruction count and execution latency.
+Scalar division only accepts `intrinsic` (the default, ordinary `/`) and
+`precision_0ulp_ftz_true`; the FTZ-false vector algorithms have no scalar
+counterpart and are rejected at verification time.
 
 #### `pto.max(a: ScalarType, b: ScalarType) -> ScalarType`
 

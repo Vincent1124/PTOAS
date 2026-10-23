@@ -66,14 +66,16 @@ hardware-facing operation surface and are not accepted as common value types.
   behavior.
 - `pto.divf` accepts floating-point scalars or builtin vectors and performs
   floating-point division elementwise. The optional attribute
-  `precisionType = #pto<div_precision high_precision>` requests correctly rounded
-  round-to-nearest-even division for scalar `f32` on A5. The default is
-  `#pto<div_precision default>`. High precision cannot be combined with fastmath
-  flags and does not support builtin vectors. Finite nonzero inputs retain
+  `precisionType = #pto<div_precision precision_0ulp_ftz_true>` requests
+  correctly rounded round-to-nearest-even division for scalar `f32` on A5; the
+  default is `#pto<div_precision intrinsic>`. Only those two selectors are
+  accepted: the FTZ-false vector algorithms have no scalar counterpart and are
+  rejected at verification time. The correctly rounded mode cannot be combined
+  with fastmath flags and does not support builtin vectors. Finite nonzero inputs retain
   subnormal inputs and gradual underflow; overflow produces signed infinity.
   Zero, infinity and NaN inputs retain the default division behavior, including
   its target-specific NaN payloads. The PTODSL spelling is
-  `pto.div(lhs, rhs, precision=pto.DivPrecision.HighPrecision)`; ordinary `/`
+  `pto.div(lhs, rhs, precision="precision_0ulp_ftz_true")`; ordinary `/`
   retains default precision.
 
 Integer overflow and floating-point exceptional values follow the ordinary

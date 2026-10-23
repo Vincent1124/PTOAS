@@ -963,7 +963,9 @@ def VMIVdivOp : VMI_Op<"vdiv", [Pure]> {
   let summary = "VMI elementwise divide";
   let arguments = (ins VMI_VRegTypeConstraint:$lhs, VMI_VRegTypeConstraint:$rhs,
                        Variadic<VMI_MaskTypeConstraint>:$mask,
-                       OptionalAttr<StrAttr>:$pmode);
+                       OptionalAttr<StrAttr>:$pmode,
+                       DefaultValuedAttr<PTO_DivPrecisionAttr,
+                                        "::mlir::pto::DivPrecision::Intrinsic">:$precisionType);
   let results = (outs VMI_VRegTypeConstraint:$result);
   let hasVerifier = 1;
   let assemblyFormat = "$lhs `,` $rhs (`,` $mask^)? attr-dict `:` type($lhs) `,` type($rhs) (`,` type($mask)^)? `->` type($result)";

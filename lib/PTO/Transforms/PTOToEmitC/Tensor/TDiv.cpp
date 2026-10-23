@@ -29,7 +29,7 @@ struct PTODivToTDIV : public OpConversionPattern<pto::TDivOp> {
     Value dst  = adaptor.getDst();
 
     ArrayAttr templateArgs = buildPrecisionTemplateArgs(
-        rewriter, op.getPrecisionType(), pto::DivPrecision::Default,
+        rewriter, op.getPrecisionType(), pto::DivPrecision::Intrinsic,
         "DivAlgorithm");
 
     createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},

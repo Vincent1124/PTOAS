@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o /dev/null 2>&1 | FileCheck %s
+
+// The 0-ULP algorithms are f32-only, exactly like the AscendC static_assert that
+// rejects them for half. The tile dispatch must reject them instead of silently
+// producing a native-divide style result.
+
+module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @TDIV_F16_ULP0_FTZ_FALSE() {
+    %lhs = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f16, rows=4, cols=64, v_row=4, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %rhs = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f16, rows=4, cols=64, v_row=4, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f16, rows=4, cols=64, v_row=4, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tdiv ins(
+      %lhs, %rhs
+        : !pto.tile_buf<loc=vec, dtype=f16, rows=4, cols=64, v_row=4, v_col=64,
+                        blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+          !pto.tile_buf<loc=vec, dtype=f16, rows=4, cols=64, v_row=4, v_col=64,
+                        blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+      outs(
+        %dst
+          : !pto.tile_buf<loc=vec, dtype=f16, rows=4, cols=64, v_row=4, v_col=64,
+                          blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+      {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
+    return
+  }
+}
+
+// CHECK: f32-only

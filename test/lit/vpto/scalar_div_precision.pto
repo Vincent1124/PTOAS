@@ -37,7 +37,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
         : !pto.ptr<f32, gm> -> f32
     %rhs_v = pto.ldg %rhs[%idx] l1cache(cache) l2cache(nmfv)
         : !pto.ptr<f32, gm> -> f32
-    %quotient = pto.divf %lhs_v, %rhs_v {precisionType = #pto<div_precision high_precision>} : f32
+    %quotient = pto.divf %lhs_v, %rhs_v {precisionType = #pto<div_precision precision_0ulp_ftz_true>} : f32
 
     pto.stg %quotient, %out[%idx] l1cache(cache) l2cache(nmfv)
         : !pto.ptr<f32, gm>, f32

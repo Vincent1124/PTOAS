@@ -90,8 +90,12 @@ enum class MlirPTORoundMode {
 };
 
 enum class MlirPTODivPrecision {
-  Default = 0,
-  HighPrecision = 1,
+  Intrinsic = 0,
+  DiffCompensation = 1,
+  Precision1UlpFtzTrue = 2,
+  Precision0UlpFtzTrue = 3,
+  Precision0UlpFtzFalse = 4,
+  Precision1UlpFtzFalse = 5,
 };
 
 enum class MlirPTOExpPrecision {

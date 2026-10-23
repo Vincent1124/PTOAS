@@ -180,7 +180,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     %src = pto.alloc_tile : !pto.tile_buf<vec, 32x64xf32>
     %dst = pto.alloc_tile : !pto.tile_buf<vec, 32x64xf32>
     pto.tload ins(%src_part : !pto.partition_tensor_view<1x1x1x32x64xf32>) outs(%src : !pto.tile_buf<vec, 32x64xf32>)
-    pto.tdivs ins(%src, %scalar : !pto.tile_buf<vec, 32x64xf32>, f32) outs(%dst : !pto.tile_buf<vec, 32x64xf32>) {precisionType = #pto<div_precision high_precision>}
+    pto.tdivs ins(%src, %scalar : !pto.tile_buf<vec, 32x64xf32>, f32) outs(%dst : !pto.tile_buf<vec, 32x64xf32>) {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
     pto.tstore ins(%dst : !pto.tile_buf<vec, 32x64xf32>) outs(%dst_part : !pto.partition_tensor_view<1x1x1x32x64xf32>)
     return
   }
@@ -199,7 +199,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     %src = pto.alloc_tile : !pto.tile_buf<vec, 63x64xf16>
     %dst = pto.alloc_tile : !pto.tile_buf<vec, 63x64xf16>
     pto.tload ins(%src_part : !pto.partition_tensor_view<1x1x1x63x64xf16>) outs(%src : !pto.tile_buf<vec, 63x64xf16>)
-    pto.tdivs ins(%src, %scalar : !pto.tile_buf<vec, 63x64xf16>, f16) outs(%dst : !pto.tile_buf<vec, 63x64xf16>) {precisionType = #pto<div_precision high_precision>}
+    pto.tdivs ins(%src, %scalar : !pto.tile_buf<vec, 63x64xf16>, f16) outs(%dst : !pto.tile_buf<vec, 63x64xf16>) {precisionType = #pto<div_precision precision_1ulp_ftz_false>}
     pto.tstore ins(%dst : !pto.tile_buf<vec, 63x64xf16>) outs(%dst_part : !pto.partition_tensor_view<1x1x1x63x64xf16>)
     return
   }
@@ -218,7 +218,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     %src = pto.alloc_tile : !pto.tile_buf<vec, 16x64xf32>
     %dst = pto.alloc_tile : !pto.tile_buf<vec, 16x64xf32>
     pto.tload ins(%src_part : !pto.partition_tensor_view<1x1x1x16x64xf32>) outs(%src : !pto.tile_buf<vec, 16x64xf32>)
-    pto.tdivs ins(%src, %scalar : !pto.tile_buf<vec, 16x64xf32>, f32) outs(%dst : !pto.tile_buf<vec, 16x64xf32>) {precisionType = #pto<div_precision high_precision>}
+    pto.tdivs ins(%src, %scalar : !pto.tile_buf<vec, 16x64xf32>, f32) outs(%dst : !pto.tile_buf<vec, 16x64xf32>) {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
     pto.tstore ins(%dst : !pto.tile_buf<vec, 16x64xf32>) outs(%dst_part : !pto.partition_tensor_view<1x1x1x16x64xf32>)
     return
   }
@@ -237,7 +237,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     %src = pto.alloc_tile : !pto.tile_buf<vec, 16x64xf16>
     %dst = pto.alloc_tile : !pto.tile_buf<vec, 16x64xf16>
     pto.tload ins(%src_part : !pto.partition_tensor_view<1x1x1x16x64xf16>) outs(%src : !pto.tile_buf<vec, 16x64xf16>)
-    pto.tdivs ins(%src, %scalar : !pto.tile_buf<vec, 16x64xf16>, f16) outs(%dst : !pto.tile_buf<vec, 16x64xf16>) {precisionType = #pto<div_precision high_precision>}
+    pto.tdivs ins(%src, %scalar : !pto.tile_buf<vec, 16x64xf16>, f16) outs(%dst : !pto.tile_buf<vec, 16x64xf16>) {precisionType = #pto<div_precision precision_1ulp_ftz_false>}
     pto.tstore ins(%dst : !pto.tile_buf<vec, 16x64xf16>) outs(%dst_part : !pto.partition_tensor_view<1x1x1x16x64xf16>)
     return
   }
@@ -256,7 +256,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     %src = pto.alloc_tile : !pto.tile_buf<vec, 16x64xf32>
     %dst = pto.alloc_tile : !pto.tile_buf<vec, 16x64xf32>
     pto.tload ins(%src_part : !pto.partition_tensor_view<1x1x1x16x64xf32>) outs(%src : !pto.tile_buf<vec, 16x64xf32>)
-    pto.tdivs ins(%src, %scalar : !pto.tile_buf<vec, 16x64xf32>, f32) outs(%dst : !pto.tile_buf<vec, 16x64xf32>) {precisionType = #pto<div_precision high_precision>}
+    pto.tdivs ins(%src, %scalar : !pto.tile_buf<vec, 16x64xf32>, f32) outs(%dst : !pto.tile_buf<vec, 16x64xf32>) {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
     pto.tstore ins(%dst : !pto.tile_buf<vec, 16x64xf32>) outs(%dst_part : !pto.partition_tensor_view<1x1x1x16x64xf32>)
     return
   }
@@ -275,7 +275,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     %src = pto.alloc_tile : !pto.tile_buf<vec, 16x64xf16>
     %dst = pto.alloc_tile : !pto.tile_buf<vec, 16x64xf16>
     pto.tload ins(%src_part : !pto.partition_tensor_view<1x1x1x16x64xf16>) outs(%src : !pto.tile_buf<vec, 16x64xf16>)
-    pto.tdivs ins(%src, %scalar : !pto.tile_buf<vec, 16x64xf16>, f16) outs(%dst : !pto.tile_buf<vec, 16x64xf16>) {precisionType = #pto<div_precision high_precision>}
+    pto.tdivs ins(%src, %scalar : !pto.tile_buf<vec, 16x64xf16>, f16) outs(%dst : !pto.tile_buf<vec, 16x64xf16>) {precisionType = #pto<div_precision precision_1ulp_ftz_false>}
     pto.tstore ins(%dst : !pto.tile_buf<vec, 16x64xf16>) outs(%dst_part : !pto.partition_tensor_view<1x1x1x16x64xf16>)
     return
   }
@@ -296,7 +296,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     %src = pto.alloc_tile : !pto.tile_buf<vec, 32x64xf32>
     %dst = pto.alloc_tile : !pto.tile_buf<vec, 32x64xf32>
     pto.tload ins(%src_part : !pto.partition_tensor_view<1x1x1x32x64xf32>) outs(%src : !pto.tile_buf<vec, 32x64xf32>)
-    pto.tdivs ins(%scalar, %src : f32, !pto.tile_buf<vec, 32x64xf32>) outs(%dst : !pto.tile_buf<vec, 32x64xf32>) {precisionType = #pto<div_precision high_precision>}
+    pto.tdivs ins(%scalar, %src : f32, !pto.tile_buf<vec, 32x64xf32>) outs(%dst : !pto.tile_buf<vec, 32x64xf32>) {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
     pto.tstore ins(%dst : !pto.tile_buf<vec, 32x64xf32>) outs(%dst_part : !pto.partition_tensor_view<1x1x1x32x64xf32>)
     return
   }
@@ -315,7 +315,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     %src = pto.alloc_tile : !pto.tile_buf<vec, 63x64xf16>
     %dst = pto.alloc_tile : !pto.tile_buf<vec, 63x64xf16>
     pto.tload ins(%src_part : !pto.partition_tensor_view<1x1x1x63x64xf16>) outs(%src : !pto.tile_buf<vec, 63x64xf16>)
-    pto.tdivs ins(%scalar, %src : f16, !pto.tile_buf<vec, 63x64xf16>) outs(%dst : !pto.tile_buf<vec, 63x64xf16>) {precisionType = #pto<div_precision high_precision>}
+    pto.tdivs ins(%scalar, %src : f16, !pto.tile_buf<vec, 63x64xf16>) outs(%dst : !pto.tile_buf<vec, 63x64xf16>) {precisionType = #pto<div_precision precision_1ulp_ftz_false>}
     pto.tstore ins(%dst : !pto.tile_buf<vec, 63x64xf16>) outs(%dst_part : !pto.partition_tensor_view<1x1x1x63x64xf16>)
     return
   }
@@ -334,7 +334,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     %src = pto.alloc_tile : !pto.tile_buf<vec, 16x64xf32>
     %dst = pto.alloc_tile : !pto.tile_buf<vec, 16x64xf32>
     pto.tload ins(%src_part : !pto.partition_tensor_view<1x1x1x16x64xf32>) outs(%src : !pto.tile_buf<vec, 16x64xf32>)
-    pto.tdivs ins(%scalar, %src : f32, !pto.tile_buf<vec, 16x64xf32>) outs(%dst : !pto.tile_buf<vec, 16x64xf32>) {precisionType = #pto<div_precision high_precision>}
+    pto.tdivs ins(%scalar, %src : f32, !pto.tile_buf<vec, 16x64xf32>) outs(%dst : !pto.tile_buf<vec, 16x64xf32>) {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
     pto.tstore ins(%dst : !pto.tile_buf<vec, 16x64xf32>) outs(%dst_part : !pto.partition_tensor_view<1x1x1x16x64xf32>)
     return
   }
@@ -353,7 +353,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     %src = pto.alloc_tile : !pto.tile_buf<vec, 16x64xf16>
     %dst = pto.alloc_tile : !pto.tile_buf<vec, 16x64xf16>
     pto.tload ins(%src_part : !pto.partition_tensor_view<1x1x1x16x64xf16>) outs(%src : !pto.tile_buf<vec, 16x64xf16>)
-    pto.tdivs ins(%scalar, %src : f16, !pto.tile_buf<vec, 16x64xf16>) outs(%dst : !pto.tile_buf<vec, 16x64xf16>) {precisionType = #pto<div_precision high_precision>}
+    pto.tdivs ins(%scalar, %src : f16, !pto.tile_buf<vec, 16x64xf16>) outs(%dst : !pto.tile_buf<vec, 16x64xf16>) {precisionType = #pto<div_precision precision_1ulp_ftz_false>}
     pto.tstore ins(%dst : !pto.tile_buf<vec, 16x64xf16>) outs(%dst_part : !pto.partition_tensor_view<1x1x1x16x64xf16>)
     return
   }
@@ -372,7 +372,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     %src = pto.alloc_tile : !pto.tile_buf<vec, 16x64xf32>
     %dst = pto.alloc_tile : !pto.tile_buf<vec, 16x64xf32>
     pto.tload ins(%src_part : !pto.partition_tensor_view<1x1x1x16x64xf32>) outs(%src : !pto.tile_buf<vec, 16x64xf32>)
-    pto.tdivs ins(%scalar, %src : f32, !pto.tile_buf<vec, 16x64xf32>) outs(%dst : !pto.tile_buf<vec, 16x64xf32>) {precisionType = #pto<div_precision high_precision>}
+    pto.tdivs ins(%scalar, %src : f32, !pto.tile_buf<vec, 16x64xf32>) outs(%dst : !pto.tile_buf<vec, 16x64xf32>) {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
     pto.tstore ins(%dst : !pto.tile_buf<vec, 16x64xf32>) outs(%dst_part : !pto.partition_tensor_view<1x1x1x16x64xf32>)
     return
   }
@@ -391,7 +391,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     %src = pto.alloc_tile : !pto.tile_buf<vec, 16x64xf16>
     %dst = pto.alloc_tile : !pto.tile_buf<vec, 16x64xf16>
     pto.tload ins(%src_part : !pto.partition_tensor_view<1x1x1x16x64xf16>) outs(%src : !pto.tile_buf<vec, 16x64xf16>)
-    pto.tdivs ins(%scalar, %src : f16, !pto.tile_buf<vec, 16x64xf16>) outs(%dst : !pto.tile_buf<vec, 16x64xf16>) {precisionType = #pto<div_precision high_precision>}
+    pto.tdivs ins(%scalar, %src : f16, !pto.tile_buf<vec, 16x64xf16>) outs(%dst : !pto.tile_buf<vec, 16x64xf16>) {precisionType = #pto<div_precision precision_1ulp_ftz_false>}
     pto.tstore ins(%dst : !pto.tile_buf<vec, 16x64xf16>) outs(%dst_part : !pto.partition_tensor_view<1x1x1x16x64xf16>)
     return
   }

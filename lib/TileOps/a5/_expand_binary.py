@@ -12,6 +12,7 @@
 from collections import namedtuple
 
 from SoftOps.div_uint import div_uint_soft
+from TileOps.a5.elementwise import div_dispatch
 
 from ptodsl import pto
 import ptodsl.tilelib as tilelib
@@ -379,13 +380,27 @@ def _div_bf16(lhs, rhs, mask):
     )
 
 
+def _div_by_precision(lhs, rhs, mask, dtype):
+    """Pointwise divide honouring the op's precisionType selector.
+
+    Row/column expand carries the same ``DivAlgo`` attribute as ``pto.tdiv`` /
+    ``pto.tdivs``, so it dispatches through the shared table instead of always
+    issuing a native divide. The compensated sequence is pointwise, which is why
+    these ops need no scratch operand any more.
+    """
+    precision = pto.get_op_attr("precisionType", "intrinsic")
+    return div_dispatch.divide(lhs, rhs, dtype, mask, precision)
+
+
 def _binary_result(lhs, rhs, mask, dtype, vector_op):
     if vector_op == pto.vmul and str(dtype) in {"i8", "ui8"}:
         return _mul_i8(lhs, rhs, mask, dtype)
-    if vector_op == pto.vdiv and str(dtype) == "bf16":
-        return _div_bf16(lhs, rhs, mask)
-    if vector_op == pto.vdiv and str(dtype) in {"ui8", "ui16", "ui32"}:
-        return div_uint_soft(lhs, rhs, mask, dtype)
+    if vector_op == pto.vdiv:
+        if str(dtype) == "bf16":
+            return _div_bf16(lhs, rhs, mask)
+        if str(dtype) in {"ui8", "ui16", "ui32"}:
+            return div_uint_soft(lhs, rhs, mask, dtype)
+        return _div_by_precision(lhs, rhs, mask, dtype)
     return vector_op(lhs, rhs, mask)
 
 

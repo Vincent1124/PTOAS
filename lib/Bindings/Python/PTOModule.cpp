@@ -203,8 +203,12 @@ static void registerPTOEnums1b(py::module_& m)
 
 static void registerPTOEnums2(py::module_ &m) {
     py::enum_<MlirPTODivPrecision>(m, "DivPrecision")
-    .value("Default", MlirPTODivPrecision::Default)
-    .value("HighPrecision", MlirPTODivPrecision::HighPrecision);
+    .value("Intrinsic", MlirPTODivPrecision::Intrinsic)
+    .value("DiffCompensation", MlirPTODivPrecision::DiffCompensation)
+    .value("Precision1UlpFtzTrue", MlirPTODivPrecision::Precision1UlpFtzTrue)
+    .value("Precision0UlpFtzTrue", MlirPTODivPrecision::Precision0UlpFtzTrue)
+    .value("Precision0UlpFtzFalse", MlirPTODivPrecision::Precision0UlpFtzFalse)
+    .value("Precision1UlpFtzFalse", MlirPTODivPrecision::Precision1UlpFtzFalse);
 
     py::enum_<MlirPTOExpPrecision>(m, "ExpPrecision")
     .value("Default", MlirPTOExpPrecision::Default)

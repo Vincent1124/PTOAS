@@ -1,0 +1,129 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o - | FileCheck %s
+
+// Every AscendC DivAlgo selector must reach the A5 Software Library decision:
+// the three native algorithms stay a single hardware divide, the three software
+// algorithms expand into their own sequence (see lib/SoftOps/div_vector.py and
+// lib/SoftOps/div_ieee754.py).
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @algo_0ulp_ftz_true(%lhs: !pto.vreg<64xf32>, %rhs: !pto.vreg<64xf32>,
+                                %dst: !pto.ptr<f32, ub>, %mask: !pto.mask<b32>)
+      attributes {pto.kernel} {
+    %c0 = arith.constant 0 : index
+    %q = pto.vdiv %lhs, %rhs, %mask {precisionType = #pto<div_precision precision_0ulp_ftz_true>} :
+      !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+    pto.vsts %q, %dst[%c0], %mask : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+    return
+  }
+
+  func.func @algo_0ulp_ftz_false(%lhs: !pto.vreg<64xf32>, %rhs: !pto.vreg<64xf32>,
+                                 %dst: !pto.ptr<f32, ub>, %mask: !pto.mask<b32>)
+      attributes {pto.kernel} {
+    %c0 = arith.constant 0 : index
+    %q = pto.vdiv %lhs, %rhs, %mask {precisionType = #pto<div_precision precision_0ulp_ftz_false>} :
+      !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+    pto.vsts %q, %dst[%c0], %mask : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+    return
+  }
+
+  func.func @algo_1ulp_ftz_false(%lhs: !pto.vreg<64xf32>, %rhs: !pto.vreg<64xf32>,
+                                 %dst: !pto.ptr<f32, ub>, %mask: !pto.mask<b32>)
+      attributes {pto.kernel} {
+    %c0 = arith.constant 0 : index
+    %q = pto.vdiv %lhs, %rhs, %mask {precisionType = #pto<div_precision precision_1ulp_ftz_false>} :
+      !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+    pto.vsts %q, %dst[%c0], %mask : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+    return
+  }
+
+  func.func @algo_intrinsic(%lhs: !pto.vreg<64xf32>, %rhs: !pto.vreg<64xf32>,
+                            %dst: !pto.ptr<f32, ub>, %mask: !pto.mask<b32>)
+      attributes {pto.kernel} {
+    %c0 = arith.constant 0 : index
+    %q = pto.vdiv %lhs, %rhs, %mask {precisionType = #pto<div_precision intrinsic>} :
+      !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+    pto.vsts %q, %dst[%c0], %mask : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+    return
+  }
+
+  func.func @algo_diff_compensation(%lhs: !pto.vreg<64xf32>, %rhs: !pto.vreg<64xf32>,
+                                    %dst: !pto.ptr<f32, ub>, %mask: !pto.mask<b32>)
+      attributes {pto.kernel} {
+    %c0 = arith.constant 0 : index
+    %q = pto.vdiv %lhs, %rhs, %mask {precisionType = #pto<div_precision diff_compensation>} :
+      !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+    pto.vsts %q, %dst[%c0], %mask : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+    return
+  }
+
+  func.func @algo_1ulp_ftz_true(%lhs: !pto.vreg<64xf32>, %rhs: !pto.vreg<64xf32>,
+                                %dst: !pto.ptr<f32, ub>, %mask: !pto.mask<b32>)
+      attributes {pto.kernel} {
+    %c0 = arith.constant 0 : index
+    %q = pto.vdiv %lhs, %rhs, %mask {precisionType = #pto<div_precision precision_1ulp_ftz_true>} :
+      !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+    pto.vsts %q, %dst[%c0], %mask : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+    return
+  }
+}
+
+// 0-ULP FTZ-true: the 21-instruction DivPrecisionImpl residual search, without
+// the dav_3510 exponent pre-scale and without subnormal re-scaling.
+// CHECK-LABEL: func.func @algo_0ulp_ftz_true
+// CHECK-DAG: pto.vdiv
+// CHECK-DAG: pto.vor
+// CHECK-DAG: pto.por
+// CHECK-DAG: pto.vmula
+// CHECK-DAG: pto.vsel
+// CHECK-NOT: pto.vshl
+// CHECK-NOT: pto.vshr
+// CHECK-NOT: pto.vshrs
+// CHECK-NOT: pto.vshls
+// CHECK-NOT: pto.vmul
+
+// 0-ULP FTZ-false: normalized 754 divide with subnormal rounding.
+// CHECK-LABEL: func.func @algo_0ulp_ftz_false
+// CHECK-DAG: pto.vdiv
+// CHECK-DAG: pto.vshrs
+// CHECK-DAG: pto.vshr
+// CHECK-DAG: pto.vshl
+// CHECK-DAG: pto.vmula
+
+// 1-ULP FTZ-false: same prologue and rounding, single divide in the normalized
+// domain and no residual search (hence no vmula).
+// CHECK-LABEL: func.func @algo_1ulp_ftz_false
+// CHECK-DAG: pto.vdiv
+// CHECK-DAG: pto.vshrs
+// CHECK-DAG: pto.vshr
+// CHECK-DAG: pto.vshl
+// CHECK-DAG: pto.vsel
+// CHECK-NOT: pto.vmula
+
+// Native algorithms never expand.
+// CHECK-LABEL: func.func @algo_intrinsic
+// CHECK: pto.vdiv
+// CHECK-NOT: pto.vmula
+// CHECK-NOT: pto.vsel
+// CHECK-NOT: pto.por
+
+// diff_compensation is the compensated implementation on f32 and therefore
+// expands exactly like the 0-ULP FTZ-true algorithm.
+// CHECK-LABEL: func.func @algo_diff_compensation
+// CHECK-DAG: pto.vdiv
+// CHECK-DAG: pto.vmula
+// CHECK-DAG: pto.vsel
+// CHECK-NOT: pto.vmul
+
+// CHECK-LABEL: func.func @algo_1ulp_ftz_true
+// CHECK: pto.vdiv
+// CHECK-NOT: pto.vmula
+// CHECK-NOT: pto.vsel
+// CHECK-NOT: pto.por

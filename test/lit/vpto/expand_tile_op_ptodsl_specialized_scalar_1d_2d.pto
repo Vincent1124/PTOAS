@@ -106,7 +106,7 @@ module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
         %dst
           : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=72, v_row=4, v_col=72,
                           blayout=row_major, slayout=none_box, fractal=512, pad=0>)
-      {precisionType = #pto<div_precision high_precision>}
+      {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
     return
   }
 

@@ -892,13 +892,17 @@ def PTO_SaturationModeAttr : EnumAttr<PTO_Dialect, PTO_SaturationModeEnum, "satu
 //===----------------------------------------------------------------------===//
 
 def PTO_DivPrecisionEnum : PTO_I32Enum<
-  "DivPrecision", "PTO TDIV precision mode", [
-    I32EnumAttrCase<"Default", 0, "default">,
-    I32EnumAttrCase<"HighPrecision", 1, "high_precision">
+  "DivPrecision", "PTO division algorithm selector", [
+    I32EnumAttrCase<"Intrinsic", 0, "intrinsic">,
+    I32EnumAttrCase<"DiffCompensation", 1, "diff_compensation">,
+    I32EnumAttrCase<"Precision1UlpFtzTrue", 2, "precision_1ulp_ftz_true">,
+    I32EnumAttrCase<"Precision0UlpFtzTrue", 3, "precision_0ulp_ftz_true">,
+    I32EnumAttrCase<"Precision0UlpFtzFalse", 4, "precision_0ulp_ftz_false">,
+    I32EnumAttrCase<"Precision1UlpFtzFalse", 5, "precision_1ulp_ftz_false">
   ]>;
 
 def PTO_DivPrecisionAttr : EnumAttr<PTO_Dialect, PTO_DivPrecisionEnum, "div_precision"> {
-  let summary = "TDIV precision mode attribute";
+  let summary = "division algorithm attribute";
 }
 //===----------------------------------------------------------------------===//
 // TEXP template controls

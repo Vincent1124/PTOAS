@@ -1397,18 +1397,18 @@ class VectorCubeSurfaceTest(unittest.TestCase):
     def test_legacy_precision_keyword_warns_and_forwards(self):
         src0, src1, dst = object(), object(), object()
         with patch_ops("unwrap_surface_value", side_effect=_identity), \
-             patch_ops("_normalize_enum_attr", return_value="high_precision") as normalize, \
+             patch_ops("_normalize_enum_attr", return_value="precision_0ulp_ftz_false") as normalize, \
              patch.object(_ops._pto, "tdiv") as tdiv_op:
             with self.assertWarns(PTODSLDeprecationWarning):
-                pto.tile.div(src0, src1, dst, div_precision="high_precision")
+                pto.tile.div(src0, src1, dst, div_precision="precision_0ulp_ftz_false")
 
         normalize.assert_called_once_with(
-            "high_precision",
+            "precision_0ulp_ftz_false",
             enum_cls=_ops._pto.DivPrecision,
             attr_cls=_ops._pto.DivPrecisionAttr,
             context="tdiv precision",
         )
-        tdiv_op.assert_called_once_with(src0, src1, dst, precision_type="high_precision")
+        tdiv_op.assert_called_once_with(src0, src1, dst, precision_type="precision_0ulp_ftz_false")
 
     def test_legacy_precision_keyword_cannot_be_combined_with_precision(self):
         with self.assertRaisesRegex(TypeError, "either precision or div_precision"):
@@ -1469,8 +1469,8 @@ class VectorCubeSurfaceTest(unittest.TestCase):
 
         src0, src1, dst = object(), object(), object()
         with patch_ops("tfmod") as tfmod_op:
-            pto.tile.fmod(src0, src1, dst, precision="high_precision")
-        tfmod_op.assert_called_once_with(src0, src1, dst, precision="high_precision")
+            pto.tile.fmod(src0, src1, dst, precision="precision_0ulp_ftz_false")
+        tfmod_op.assert_called_once_with(src0, src1, dst, precision="precision_0ulp_ftz_false")
 
         src, scalar, dst = object(), 3.0, object()
         with patch_ops("tfmods") as tfmods_op:
@@ -1484,8 +1484,8 @@ class VectorCubeSurfaceTest(unittest.TestCase):
         tmp = object()
         scalar = 3.0
         with patch_ops("trem") as trem_op:
-            pto.tile.rem(src0, src1, dst, tmp=tmp, precision="high_precision")
-        trem_op.assert_called_once_with(src0, src1, dst, tmp=tmp, precision="high_precision")
+            pto.tile.rem(src0, src1, dst, tmp=tmp, precision="precision_0ulp_ftz_false")
+        trem_op.assert_called_once_with(src0, src1, dst, tmp=tmp, precision="precision_0ulp_ftz_false")
 
         with patch_ops("trems") as trems_op:
             pto.tile.rems(src0, scalar, dst)

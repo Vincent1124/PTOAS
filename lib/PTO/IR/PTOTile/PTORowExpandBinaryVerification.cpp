@@ -89,9 +89,6 @@ mlir::LogicalResult mlir::pto::TRowExpandDivOp::verify() {
       }
       return emitOpError("expects element type to be f16 or f32");
     }
-    if (getPrecisionType() == pto::DivPrecision::HighPrecision && !getTmp()) {
-      return emitOpError("expects tmp when precisionType is high_precision");
-    }
     if (failed(verifyTRowExpandImplicitTmpContract(
             getOperation(), src0Ty, src1Ty, dstTy,
             getTmp() ? getTmp().getType() : Type{}, static_cast<bool>(getTmp()),

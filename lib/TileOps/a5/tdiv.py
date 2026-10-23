@@ -23,7 +23,7 @@ def _emit_tdiv(src0, src1, dst, traversal):
     """Emit the operation-specific default or high-precision division."""
 
     dtype = dst.dtype
-    precision_type = pto.get_op_attr("precisionType", "default")
+    precision_type = pto.get_op_attr("precisionType", "intrinsic")
 
     def divide(lhs, rhs, mask):
         return _divide(lhs, rhs, dtype, mask, precision_type)

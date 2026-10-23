@@ -78,15 +78,16 @@ struct PTORowExpandDivToEmitC
   LogicalResult matchAndRewrite(pto::TRowExpandDivOp op,
                                 OpConversionPattern<pto::TRowExpandDivOp>::OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    if (op.getPrecisionType() == pto::DivPrecision::Default)
+    if (op.getPrecisionType() == pto::DivPrecision::Intrinsic) {
       return PTORowExpandBinaryToEmitC<pto::TRowExpandDivOp, true>::
           matchAndRewrite(op, adaptor, rewriter);
+    }
 
     createLastUseAwareOpaqueCall(
         rewriter, op.getOperation(), TypeRange{}, "TROWEXPANDDIV",
         collectRowExpandOperands(op, adaptor), ArrayAttr{},
         buildPrecisionTemplateArgs(rewriter, op.getPrecisionType(),
-                                   pto::DivPrecision::Default,
+                                   pto::DivPrecision::Intrinsic,
                                    "DivAlgorithm"));
     rewriter.eraseOp(op);
     return success();

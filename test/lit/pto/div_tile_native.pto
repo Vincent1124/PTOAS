@@ -19,7 +19,7 @@ module {
       %dst: !pto.tile_buf<vec, 16x16xf32>) {
     pto.tdiv ins(%src0, %src1 : !pto.tile_buf<vec, 16x16xf32>, !pto.tile_buf<vec, 16x16xf32>)
              outs(%dst : !pto.tile_buf<vec, 16x16xf32>)
-             {precisionType = #pto<div_precision high_precision>}
+             {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
     return
   }
 
@@ -29,7 +29,7 @@ module {
       %dst: !pto.tile_buf<vec, 16x16xf32>) {
     pto.tdivs ins(%src, %scalar : !pto.tile_buf<vec, 16x16xf32>, f32)
               outs(%dst : !pto.tile_buf<vec, 16x16xf32>)
-              {precisionType = #pto<div_precision high_precision>}
+              {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
     return
   }
 
@@ -39,17 +39,17 @@ module {
       %dst: !pto.tile_buf<vec, 16x16xf32>) {
     pto.tdivs ins(%scalar, %src : f32, !pto.tile_buf<vec, 16x16xf32>)
               outs(%dst : !pto.tile_buf<vec, 16x16xf32>)
-              {precisionType = #pto<div_precision high_precision>}
+              {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
     return
   }
 }
 
 // NATIVE-LABEL: func.func private @tdiv_arg(
-// NATIVE: pto.tdiv ins(%arg0, %arg1 : !pto.tile_buf<vec, 16x16xf32>, !pto.tile_buf<vec, 16x16xf32>) outs(%arg2 : !pto.tile_buf<vec, 16x16xf32>) {precisionType = #pto<div_precision high_precision>}
+// NATIVE: pto.tdiv ins(%arg0, %arg1 : !pto.tile_buf<vec, 16x16xf32>, !pto.tile_buf<vec, 16x16xf32>) outs(%arg2 : !pto.tile_buf<vec, 16x16xf32>) {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
 // NATIVE-LABEL: func.func private @tdivs_tile_scalar_arg(
-// NATIVE: pto.tdivs ins(%arg0, %arg1 : !pto.tile_buf<vec, 16x16xf32>, f32) outs(%arg2 : !pto.tile_buf<vec, 16x16xf32>) {precisionType = #pto<div_precision high_precision>}
+// NATIVE: pto.tdivs ins(%arg0, %arg1 : !pto.tile_buf<vec, 16x16xf32>, f32) outs(%arg2 : !pto.tile_buf<vec, 16x16xf32>) {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
 // NATIVE-LABEL: func.func private @tdivs_scalar_tile_arg(
-// NATIVE: pto.tdivs ins(%arg0, %arg1 : f32, !pto.tile_buf<vec, 16x16xf32>) outs(%arg2 : !pto.tile_buf<vec, 16x16xf32>) {precisionType = #pto<div_precision high_precision>}
+// NATIVE: pto.tdivs ins(%arg0, %arg1 : f32, !pto.tile_buf<vec, 16x16xf32>) outs(%arg2 : !pto.tile_buf<vec, 16x16xf32>) {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
 // NATIVE-NOT: memref<
 
 // EMITC-LABEL: tdiv_arg(

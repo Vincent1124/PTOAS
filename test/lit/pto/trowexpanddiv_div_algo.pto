@@ -1,0 +1,77 @@
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=pto-expand-tile-op %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=EXPAND
+// RUN: ptoas --pto-arch=a5 %s -o /dev/null && echo OK | FileCheck %s --check-prefix=VERIFY
+
+// Row-expand division carries the same DivAlgo selector as pto.tdiv, so a
+// software algorithm must expand to the compensated / normalised sequence
+// instead of a single native divide. The compensated sequence is pointwise,
+// hence no tmp operand is required any more.
+
+// VERIFY: OK
+
+module {
+  func.func @trowexpanddiv_ulp0_ftz_false() {
+    %src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=16, v_row=4, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=8, v_row=4, v_col=8, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=16, v_row=4, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.trowexpanddiv ins(%src0, %src1 : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=16, v_row=4, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=8, v_row=4, v_col=8, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                       outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=16, v_row=4, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                       {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
+    return
+  }
+
+  func.func @trowexpanddiv_diff_compensation() {
+    %src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=16, v_row=4, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=8, v_row=4, v_col=8, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=16, v_row=4, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.trowexpanddiv ins(%src0, %src1 : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=16, v_row=4, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=8, v_row=4, v_col=8, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                       outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=16, v_row=4, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                       {precisionType = #pto<div_precision diff_compensation>}
+    return
+  }
+
+  func.func @tcolexpanddiv_diff_compensation() {
+    %src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=16, v_row=8, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=16, v_row=4, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=16, v_row=8, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tcolexpanddiv ins(%src0, %src1 : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=16, v_row=8, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=16, v_row=4, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                       outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=16, v_row=8, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                       {precisionType = #pto<div_precision diff_compensation>}
+    return
+  }
+
+  func.func @trowexpanddiv_intrinsic() {
+    %src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=16, v_row=4, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=8, v_row=4, v_col=8, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=16, v_row=4, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.trowexpanddiv ins(%src0, %src1 : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=16, v_row=4, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=8, v_row=4, v_col=8, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                       outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=16, v_row=4, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                       {precisionType = #pto<div_precision intrinsic>}
+    return
+  }
+}
+
+// The 0-ULP FTZ-false algorithm normalises the operands and runs the residual
+// search; diff_compensation shares the compensated sequence; intrinsic stays a
+// single native divide.
+// EXPAND-LABEL: func.func private @{{.*}}precision_0ulp_ftz_false__template_trowexpanddiv
+// EXPAND-DAG: pto.vdiv
+// EXPAND-DAG: pto.vshl
+// EXPAND-DAG: pto.vshrs
+// EXPAND-DAG: pto.vmula
+
+// EXPAND-LABEL: func.func private @{{.*}}diff_compensation__template_trowexpanddiv
+// EXPAND-DAG: pto.vdiv
+// EXPAND-DAG: pto.vmula
+// EXPAND-DAG: pto.vsel
+
+// The column-expand sibling uses the same dispatch.
+// EXPAND-LABEL: func.func private @{{.*}}diff_compensation__template_tcolexpanddiv
+// EXPAND-DAG: pto.vdiv
+// EXPAND-DAG: pto.vmula
+
+// EXPAND-LABEL: func.func private @{{.*}}intrinsic__template_trowexpanddiv
+// EXPAND-NOT: pto.vmula

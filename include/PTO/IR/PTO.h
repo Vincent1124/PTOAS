@@ -155,6 +155,56 @@ enum class PTOArch {
   A5,
 };
 
+/// AscendC ``DivAlgo`` token for the algorithm selector (IR mnemonic spelling).
+inline llvm::StringRef getDivAlgoToken(DivPrecision precision) {
+  switch (precision) {
+  case DivPrecision::Intrinsic:
+    return "intrinsic";
+  case DivPrecision::DiffCompensation:
+    return "diff_compensation";
+  case DivPrecision::Precision1UlpFtzTrue:
+    return "precision_1ulp_ftz_true";
+  case DivPrecision::Precision0UlpFtzTrue:
+    return "precision_0ulp_ftz_true";
+  case DivPrecision::Precision0UlpFtzFalse:
+    return "precision_0ulp_ftz_false";
+  case DivPrecision::Precision1UlpFtzFalse:
+    return "precision_1ulp_ftz_false";
+  }
+  llvm_unreachable("unknown DivPrecision");
+}
+
+/// Division algorithms that are always expanded through the Software Library,
+/// whatever the element type: the two 0-ULP variants and the 1-ULP FTZ-false
+/// variant. ``intrinsic`` and ``1ulp_ftz_true`` lower to the single native vector
+/// divide. ``diff_compensation`` is software only for f32 (it maps to the
+/// compensated sequence of AscendC's FTZ build) and native elsewhere, so use
+/// ``usesSoftwareDivExpansion`` when the element type is known.
+inline bool isSoftwareDivAlgo(DivPrecision precision) {
+  switch (precision) {
+  case DivPrecision::Precision0UlpFtzTrue:
+  case DivPrecision::Precision0UlpFtzFalse:
+  case DivPrecision::Precision1UlpFtzFalse:
+    return true;
+  case DivPrecision::Intrinsic:
+  case DivPrecision::DiffCompensation:
+  case DivPrecision::Precision1UlpFtzTrue:
+    return false;
+  }
+  return false;
+}
+
+/// True for the selectors that expand through the A5 f32 Software Library.
+/// ``diff_compensation`` is compensated for f32 and a plain native divide for
+/// every other element type, so the type matters here.
+inline bool usesSoftwareDivExpansion(DivPrecision precision, Type elementType) {
+  if (isSoftwareDivAlgo(precision)) {
+    return true;
+  }
+  return precision == DivPrecision::DiffCompensation && elementType &&
+         elementType.isF32();
+}
+
 /// The semantic form selected by the optional third tile of pto.tmov.  The
 /// public operand remains named `fp` for API compatibility; address space is
 /// the sole discriminator between legacy FP and exponent X-to-ZZ lowering.

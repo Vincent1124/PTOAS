@@ -111,7 +111,7 @@ def scalar_division_body(
     tid = pto.get_tid_x()
     lhs = pto.ldg(lhs_ptr, tid)
     rhs = pto.ldg(rhs_ptr, tid)
-    quotient = pto.div(lhs, rhs, precision=pto.DivPrecision.HighPrecision)
+    quotient = pto.div(lhs, rhs, precision="precision_0ulp_ftz_true")
     pto.stg(quotient, out_ptr, tid)
 
 
@@ -179,7 +179,7 @@ def high_precision_vector_division_kernel(
             mask = pto.pset_b32(pto.MaskPattern.ALL)
             lhs = pto.vlds(lhs_tile[0, 0:])
             rhs = pto.vlds(rhs_tile[0, 0:])
-            quotient = pto.vdiv(lhs, rhs, mask, precision=pto.DivPrecision.HighPrecision)
+            quotient = pto.vdiv(lhs, rhs, mask, precision="precision_0ulp_ftz_true")
             pto.vsts(quotient, out_tile.as_ptr(), 0, mask, dist="NORM_B32")
 
         pto.set_flag("V", "MTE3", event_id=0)
@@ -187,6 +187,116 @@ def high_precision_vector_division_kernel(
         pto.tile.store(out_tile, out_part)
         # The next iteration reuses the input and output UB tiles.
         pto.pipe_barrier(pto.Pipe.ALL)
+
+
+def _make_ftz_false_kernel(name, algo):
+    @pto.jit(
+        name=name,
+        kernel_kind="vector",
+        target="a5",
+        mode="explicit",
+        insert_sync=False,
+    )
+    def kernel(
+        lhs_ptr: pto.ptr(pto.f32, "gm"),
+        rhs_ptr: pto.ptr(pto.f32, "gm"),
+        out_ptr: pto.ptr(pto.f32, "gm"),
+    ):
+        for offset in pto.static_range(0, VECTOR_ELEMENTS, LANES):
+            lhs_tile, rhs_tile, out_tile, out_part = _vector_load_store(
+                lhs_ptr, rhs_ptr, out_ptr, VECTOR_ELEMENTS, offset
+            )
+            with pto.tileop():
+                mask = pto.pset_b32(pto.MaskPattern.ALL)
+                lhs = pto.vlds(lhs_tile[0, 0:])
+                rhs = pto.vlds(rhs_tile[0, 0:])
+                quotient = pto.vdiv(lhs, rhs, mask, precision=algo)
+                pto.vsts(quotient, out_tile.as_ptr(), 0, mask, dist="NORM_B32")
+
+            pto.set_flag("V", "MTE3", event_id=0)
+            pto.wait_flag("V", "MTE3", event_id=0)
+            pto.tile.store(out_tile, out_part)
+            pto.pipe_barrier(pto.Pipe.ALL)
+
+    return kernel
+
+
+vector_division_0ulp_ftz_false_kernel = _make_ftz_false_kernel(
+    "vector_division_0ulp_ftz_false_kernel", "precision_0ulp_ftz_false"
+)
+vector_division_1ulp_ftz_false_kernel = _make_ftz_false_kernel(
+    "vector_division_1ulp_ftz_false_kernel", "precision_1ulp_ftz_false"
+)
+
+
+def _ieee754_inputs():
+    """Operands that exercise the subnormal / overflow boundaries."""
+    rng = np.random.default_rng(20261022)
+    lhs = (rng.random(VECTOR_ELEMENTS, dtype=np.float32) * 2 - 1).astype(np.float32)
+    exponent = rng.integers(-140, 120, VECTOR_ELEMENTS, dtype=np.int32)
+    rhs = np.exp2(exponent.astype(np.float32)).astype(np.float32)
+    rhs[0], lhs[0] = 1.0, 1.0
+    rhs[1], lhs[1] = 3.0, 1.0
+    # subnormal dividend and divisor pairs
+    lhs[2], rhs[2] = np.float32(1.0), np.float32(2.0 ** -126)
+    lhs[3], rhs[3] = np.float32(2.0 ** -149), np.float32(1.0)
+    lhs[4], rhs[4] = np.float32(2.0 ** -149), np.float32(3.0)
+    return [lhs, rhs]
+
+
+def _ieee754_expected(lhs, rhs):
+    with np.errstate(all="ignore"):
+        return np.divide(lhs, rhs, dtype=np.float32)
+
+
+def _ulp_distance(actual, expected):
+    a = actual.view(np.int32).astype(np.int64)
+    b = expected.view(np.int32).astype(np.int64)
+    a = np.where(a < 0, np.int64(0x80000000) - a, a)
+    b = np.where(b < 0, np.int64(0x80000000) - b, b)
+    return np.abs(a - b)
+
+
+def _ftz_false_zero_ulp_case():
+    def make_case():
+        inputs = _ieee754_inputs()
+        golden = _ieee754_expected(*inputs)
+        return [*inputs, np.zeros(golden.shape, dtype=np.float32)], golden
+
+    def check_case(device_inputs, golden):
+        actual = device_inputs[-1].cpu().numpy()
+        mismatch = np.flatnonzero(actual.view(np.uint32) != golden.view(np.uint32))
+        assert mismatch.size == 0, (
+            f"0ulp_ftz_false must be correctly rounded; {mismatch.size} lanes differ, "
+            f"first at {mismatch[:4]} actual={actual[mismatch[:4]]} golden={golden[mismatch[:4]]}"
+        )
+
+    return {
+        "name": "vector_division_0ulp_ftz_false",
+        "kernel": vector_division_0ulp_ftz_false_kernel,
+        "make_case": make_case,
+        "check": check_case,
+    }
+
+
+def _ftz_false_one_ulp_case():
+    def make_case():
+        inputs = _ieee754_inputs()
+        golden = _ieee754_expected(*inputs)
+        return [*inputs, np.zeros(golden.shape, dtype=np.float32)], golden
+
+    def check_case(device_inputs, golden):
+        actual = device_inputs[-1].cpu().numpy()
+        distance = _ulp_distance(actual, golden)
+        worst = int(distance.max())
+        assert worst <= 1, f"1ulp_ftz_false exceeded 1 ULP (worst={worst})"
+
+    return {
+        "name": "vector_division_1ulp_ftz_false",
+        "kernel": vector_division_1ulp_ftz_false_kernel,
+        "make_case": make_case,
+        "check": check_case,
+    }
 
 
 @pto.jit(
@@ -211,7 +321,7 @@ def high_precision_vector_division_partial_mask_kernel(
         pto.vsts(sentinel, out_tile.as_ptr(), 0, full_mask, dist="NORM_B32")
         lhs = pto.vlds(lhs_tile[0, 0:])
         rhs = pto.vlds(rhs_tile[0, 0:])
-        quotient = pto.vdiv(lhs, rhs, active_mask, precision=pto.DivPrecision.HighPrecision)
+        quotient = pto.vdiv(lhs, rhs, active_mask, precision="precision_0ulp_ftz_true")
         pto.vsts(quotient, out_tile.as_ptr(), 0, active_mask, dist="NORM_B32")
 
     pto.set_flag("V", "MTE3", event_id=0)
@@ -243,7 +353,7 @@ def high_precision_vector_division_holey_mask_kernel(
             holey_mask = pto.pand(lt48, not_lt16, all_mask)
             lhs = pto.vlds(lhs_tile[0, 0:])
             rhs = pto.vlds(rhs_tile[0, 0:])
-            quotient = pto.vdiv(lhs, rhs, holey_mask, precision=pto.DivPrecision.HighPrecision)
+            quotient = pto.vdiv(lhs, rhs, holey_mask, precision="precision_0ulp_ftz_true")
             # A masked vector operation does not define inactive result lanes.
             # Initialize the destination first, then update only active lanes;
             # the full tile store therefore observes deterministic zeroes in
@@ -289,7 +399,7 @@ def high_precision_vector_division_native_comparison_kernel(
         lhs = pto.vlds(lhs_tile[0, 0:])
         rhs = pto.vlds(rhs_tile[0, 0:])
         native = pto.vdiv(lhs, rhs, mask)
-        precise = pto.vdiv(lhs, rhs, mask, precision=pto.DivPrecision.HighPrecision)
+        precise = pto.vdiv(lhs, rhs, mask, precision="precision_0ulp_ftz_true")
         pto.vsts(native, native_tile.as_ptr(), 0, mask, dist="NORM_B32")
         pto.vsts(precise, precise_tile.as_ptr(), 0, mask, dist="NORM_B32")
 
@@ -506,7 +616,7 @@ def scalar_precision_comparison_body(
     separate = pto.add(pto.mul(mul_lhs, mul_rhs), acc)
     fused = pto.fma(mul_lhs, mul_rhs, acc)
     ordinary = pto.div(lhs, rhs)
-    precise = pto.div(lhs, rhs, precision=pto.DivPrecision.HighPrecision)
+    precise = pto.div(lhs, rhs, precision="precision_0ulp_ftz_true")
     pto.stg(separate, out_ptr, tid)
     pto.stg(fused, out_ptr, tid + VECTOR_ELEMENTS)
     pto.stg(ordinary, out_ptr, tid + 2 * VECTOR_ELEMENTS)
@@ -606,6 +716,8 @@ CASES = [
     _native_rounding_case(),
     _nan_case(),
     _precision_case(),
+    _ftz_false_zero_ulp_case(),
+    _ftz_false_one_ulp_case(),
 ]
 
 

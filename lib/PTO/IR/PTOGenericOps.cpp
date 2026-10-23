@@ -172,16 +172,26 @@ LogicalResult DivFOp::verify() {
   if (failed(verifyFloatArithmeticOp(*this))) {
     return failure();
   }
-  const bool precise = getPrecisionType() == DivPrecision::HighPrecision;
-  if (!precise) {
+  const DivPrecision algo = getPrecisionType();
+  // Scalar division supports the native divide (``intrinsic``) and the
+  // correctly-rounded SoftLib path (``precision_0ulp_ftz_true``); the vector
+  // algorithms with subnormal re-scaling have no scalar counterpart, so they are
+  // rejected here instead of silently degrading to another implementation.
+  if (algo != DivPrecision::Intrinsic &&
+      algo != DivPrecision::Precision0UlpFtzTrue) {
+    return emitOpError(getDivAlgoToken(algo).str() +
+                       " is not supported for scalar division; use intrinsic "
+                       "or precision_0ulp_ftz_true");
+  }
+  if (algo != DivPrecision::Precision0UlpFtzTrue) {
     return success();
   }
   if (!getResult().getType().isF32()) {
-    return emitOpError("high_precision requires scalar f32 operands");
+    return emitOpError("precision_0ulp_ftz_true requires scalar f32 operands");
   }
   const bool hasFastmath = getFastmath() != FastMathFlags::none;
   if (hasFastmath) {
-    return emitOpError("high_precision does not allow fastmath flags");
+    return emitOpError("precision_0ulp_ftz_true does not allow fastmath flags");
   }
   return success();
 }

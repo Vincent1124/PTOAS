@@ -4162,7 +4162,7 @@ def TColExpandDivOp : PTO_TOp<"tcolexpanddiv", [
     PTODpsType:$src0,
     PTODpsType:$src1,
     PTODpsType:$dst,
-    DefaultValuedAttr<PTO_DivPrecisionAttr, "::mlir::pto::DivPrecision::Default">:$precisionType
+    DefaultValuedAttr<PTO_DivPrecisionAttr, "::mlir::pto::DivPrecision::Intrinsic">:$precisionType
   );
 
   let results = (outs);
@@ -4535,7 +4535,7 @@ def TDivOp : PTO_TOp<"tdiv", [
     PTODpsType:$src0,
     PTODpsType:$src1,
     PTODpsType:$dst,
-    DefaultValuedAttr<PTO_DivPrecisionAttr, "::mlir::pto::DivPrecision::Default">:$precisionType
+    DefaultValuedAttr<PTO_DivPrecisionAttr, "::mlir::pto::DivPrecision::Intrinsic">:$precisionType
   );
 
   let results = (outs);
@@ -4566,7 +4566,7 @@ def TDivSOp : PTO_TOp<"tdivs", [
     AnyType:$src,
     AnyType:$scalar,
     PTODpsType:$dst,
-    DefaultValuedAttr<PTO_DivPrecisionAttr, "::mlir::pto::DivPrecision::Default">:$precisionType
+    DefaultValuedAttr<PTO_DivPrecisionAttr, "::mlir::pto::DivPrecision::Intrinsic">:$precisionType
   );
 
   let results = (outs);
@@ -6064,7 +6064,7 @@ def TRowExpandDivOp: PTO_TOp<"trowexpanddiv", [
     PTODpsType:$src1,
     Optional<PTODpsType>:$tmp,
     PTODpsType:$dst,
-    DefaultValuedAttr<PTO_DivPrecisionAttr, "::mlir::pto::DivPrecision::Default">:$precisionType
+    DefaultValuedAttr<PTO_DivPrecisionAttr, "::mlir::pto::DivPrecision::Intrinsic">:$precisionType
   );
 
   let results = (outs);

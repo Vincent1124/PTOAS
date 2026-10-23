@@ -160,7 +160,8 @@ mlir::LogicalResult mlir::pto::TRsqrtOp::verify() {
     return emitOpError("expects element type to be f16 or f32");
   }
   if (getPrecisionType() == pto::RsqrtPrecision::HighPrecision && !getTmp()) {
-    return emitOpError("expects tmp when precisionType is high_precision");
+    return emitOpError(
+          "expects tmp when precisionType selects a non-default algorithm");
   }
   if (auto tmp = getTmp()) {
     Type tt = tmp.getType();

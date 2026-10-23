@@ -8,14 +8,32 @@
 
 // RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o - | FileCheck %s
 // RUN: ptoas --pto-arch=a5 --pto-backend=vpto --vpto-scheduler=off --emit-vpto-llvm-ir %s -o - | FileCheck %s --check-prefix=LLVM
-// LLVM: call <64 x float> @llvm.hivm.vdiv
-// LLVM: call <64 x i32> @llvm.hivm.vadds{{.*}}i32 -1
-// LLVM: call <64 x i32> @llvm.hivm.vadds{{.*}}i32 1
-// LLVM-COUNT-3: call <64 x float> @llvm.hivm.vmula
-// CHECK: pto.vdiv
-// CHECK: pto.vbitcast
-// CHECK: pto.vmula
-// CHECK: pto.vsel
+// The expansion mirrors the unscaled AscendC ``DivPrecisionImpl``: hardware
+// divide, the special-value predicate OR, the residual search over the two bit
+// neighbours, and the select chain. The pipeline may reorder the operations, so
+// presence is checked order-insensitively.
+// LLVM-DAG: call <64 x float> @llvm.hivm.vdiv
+// LLVM-DAG: call <64 x i32> @llvm.hivm.vor
+// LLVM-DAG: call <256 x i1> @llvm.hivm.vcmps{{.*}}ge
+// LLVM-DAG: call <256 x i1> @llvm.hivm.vcmps{{.*}}eq
+// LLVM-DAG: call <256 x i1> @llvm.hivm.por
+// LLVM-DAG: call <64 x float> @llvm.hivm.vmuls
+// LLVM-DAG: call <64 x float> @llvm.hivm.vmula
+// LLVM-DAG: call <64 x float> @llvm.hivm.vabs
+// LLVM-DAG: call <256 x i1> @llvm.hivm.vcmp{{.*}}lt
+// LLVM-DAG: call <64 x float> @llvm.hivm.vsel
+// CHECK-DAG: pto.vdiv
+// CHECK-DAG: pto.vor
+// CHECK-DAG: pto.vcmps
+// CHECK-DAG: pto.por
+// CHECK-DAG: pto.vmuls
+// CHECK-DAG: pto.vmula
+// CHECK-DAG: pto.vabs
+// CHECK-DAG: pto.vcmp
+// CHECK-DAG: pto.vsel
+// No round-half-even machinery and no full-width staging mask.
+// CHECK-NOT: pto.pand
+// CHECK-NOT: pto.pset_b32
 // CHECK-NOT: high_precision
 
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
@@ -24,7 +42,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
                                   %dst: !pto.ptr<f32, ub>,
                                   %mask: !pto.mask<b32>) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
-    %quotient = pto.vdiv %lhs, %rhs, %mask {precisionType = #pto<div_precision high_precision>} :
+    %quotient = pto.vdiv %lhs, %rhs, %mask {precisionType = #pto<div_precision precision_0ulp_ftz_true>} :
       !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
     pto.vsts %quotient, %dst[%c0], %mask :
       !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>

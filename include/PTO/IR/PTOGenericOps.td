@@ -213,7 +213,7 @@ def PTO_DivFOp : PTO_GenericOp<"divf", [
     DefaultValuedAttr<PTO_FastMathAttr,
                       "::mlir::pto::FastMathFlags::none">:$fastmath,
     DefaultValuedAttr<PTO_DivPrecisionAttr,
-                      "::mlir::pto::DivPrecision::Default">:$precisionType
+                      "::mlir::pto::DivPrecision::Intrinsic">:$precisionType
   );
   let results = (outs PTO_GenericFloatType:$result);
   let hasVerifier = 1;

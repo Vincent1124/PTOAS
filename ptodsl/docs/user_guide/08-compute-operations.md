@@ -41,10 +41,11 @@ pto.tile.mul(scale_tile, data_tile, scaled_tile)
 
 ---
 
-#### `pto.tile.div(src0: Tile, src1: Tile, dst: Tile, *, precision: Precision = Precision.Default) -> None`
+#### `pto.tile.div(src0: Tile, src1: Tile, dst: Tile, *, precision: str = "intrinsic") -> None`
 
-**Description**: Element-wise division. `precision` can be `Default` or
-`HighPrecision` (f16/f32 only).
+**Description**: Element-wise division. `precision` names an AscendC `DivAlgo`
+algorithm; see [Division algorithms](#division-algorithms) for the full list and
+the per-type support matrix.
 
 `div_precision` remains accepted temporarily for compatibility and emits a
 `PTODSLDeprecationWarning`; use `precision` for new code. The same migration
@@ -58,9 +59,69 @@ applies to the operation-specific precision keywords for `exp`, `log`, `sqrt`,
 | `src0` | `Tile` | Numerator tile |
 | `src1` | `Tile` | Denominator tile |
 | `dst` | `Tile` | Destination tile |
-| `precision` | `Precision` | `Default` (default) or `HighPrecision` |
+| `precision` | `str` | Division algorithm, default `"intrinsic"` |
 
 **Returns**: None.
+
+---
+
+### Division algorithms
+
+`pto.tile.div`, `pto.tdivs`, `pto.trowexpanddiv`, `pto.tcolexpanddiv`, `pto.vdiv`
+and `pto.div` share one selector: the AscendC `DivAlgo` algorithm name. The
+default `intrinsic` is the ordinary hardware divide and is elided from the
+printed IR. The tile forms expand the software algorithms inline (the sequences
+are pointwise), so none of them needs a `tmp` operand.
+
+| `precision` | AscendC `DivAlgo` | A5 f32 lowering | Element types | `tmp`/mask requirement |
+| --- | --- | --- | --- | --- |
+| `"intrinsic"` | `INTRINSIC` | one native vector divide | any supported element type | none |
+| `"diff_compensation"` | `DIFF_COMPENSATION` | compensated residual search (same sequence as `precision_0ulp_ftz_true`) | f32 | `b32` mask; no `tmp` needed |
+| `"precision_1ulp_ftz_true"` | `PRECISION_1ULP_FTZ_TRUE` | one native vector divide | any supported element type | none |
+| `"precision_0ulp_ftz_true"` | `PRECISION_0ULP_FTZ_TRUE` | 21-op residual search (`DivPrecisionImpl`) | f32 only | `b32` mask; no `tmp` needed |
+| `"precision_0ulp_ftz_false"` | `PRECISION_0ULP_FTZ_FALSE` | normalise + residual search + IEEE rounding | f32 only | `b32` mask; no `tmp` needed |
+| `"precision_1ulp_ftz_false"` | `PRECISION_1ULP_FTZ_FALSE` | normalise + single divide + IEEE rounding | f32 only | `b32` mask; no `tmp` needed |
+
+The shorthand spellings `"0ulp_ftz_true"`, `"0ulp_ftz_false"` and
+`"1ulp_ftz_false"` are accepted as well. The correctly rounded scalar
+`pto.div` only supports `"intrinsic"` and `"precision_0ulp_ftz_true"`.
+
+**FTZ and ULP semantics.**
+
+* `ftz_true` keeps the native flush-to-zero behaviour: subnormal operands and
+  results are flushed, and no subnormal re-scaling is emitted.
+* `ftz_false` multiplies subnormal operands by `2^23`, divides in the normalised
+  domain and re-applies the exponent, so subnormal inputs and gradual underflow
+  are preserved (the shift-out rounding is done explicitly).
+* `0ulp` means the quotient is the nearest representable value: the residual of
+  the hardware quotient and of its two bit neighbours is compared and the
+  smallest one wins. An exact tie takes the lower neighbour (`z - 1`), matching
+  the reference `vcmp_lt` + `vsel(z, z, zPre)` sequence; there is no
+  round-half-even tie breaking.
+* The 0-ULP implementations use the **unscaled** sequence (21 instructions for
+  `precision_0ulp_ftz_true`, 96/131 for the two FTZ-false variants). The
+  `dav_3510` reference additionally pre-scales both operands by `2^k` when the
+  dividend exponent is below −64 (+11 instructions); that block is intentionally
+  omitted for throughput, and it matches the AscendC template the ASC backend
+  compiles today. Under flush-to-zero the residual of extremely small dividends
+  (exponent below about −102) can be flushed, in which case the tie rule keeps
+  `z - 1` and the result may sit one ULP away from the native divide — use
+  `precision_0ulp_ftz_false` when that corner must be exact.
+* `1ulp` routes the normalised quotient through a single hardware divide and
+  only fixes the subnormal rounding, so the result can be up to one ULP away
+  from the nearest value (in practice the hardware divide is usually already
+  correctly rounded).
+
+**Migration from `HighPrecision`.** `high_precision` was removed; replace it as
+follows:
+
+| Old value | New value |
+| --- | --- |
+| `precision=pto.DivPrecision.HighPrecision` on `pto.vdiv` / `pto.div` | `precision="precision_0ulp_ftz_true"` |
+| `div_precision="high_precision"` on `pto.tile.div` / `tdivs` / `rowexpanddiv` / `colexpanddiv` | `div_precision="precision_0ulp_ftz_false"` |
+
+The tile path historically used the IEEE-754 0-ULP implementation, hence the
+different target value.
 
 ---
 
@@ -1866,18 +1927,17 @@ exp_vec = pto.vexp(s_row, col_mask)
 #### `pto.vadd(v0: VRegType, v1: VRegType, mask: MaskType) -> VRegType`
 #### `pto.vsub(v0: VRegType, v1: VRegType, mask: MaskType) -> VRegType`
 #### `pto.vmul(v0: VRegType, v1: VRegType, mask: MaskType) -> VRegType`
-#### `pto.vdiv(v0: VRegType, v1: VRegType, mask: MaskType, *, precision=None) -> VRegType`
+#### `pto.vdiv(v0: VRegType, v1: VRegType, mask: MaskType, *, precision: str = None) -> VRegType`
 #### `pto.vmax(v0: VRegType, v1: VRegType, mask: MaskType) -> VRegType`
 #### `pto.vmin(v0: VRegType, v1: VRegType, mask: MaskType) -> VRegType`
 
 **Description**: Element-wise binary operation: `result[i] = v0[i] <op> v1[i]` for lanes where `mask[i]` is true.
 
-For `pto.vdiv`, pass
-`precision=pto.DivPrecision.HighPrecision` only when the additional
-precision is required. High-precision vector division is supported only on A5
-and is expanded through SoftLib. This expansion can substantially increase the
-generated instruction count and execution latency. The default mode retains
-the ordinary vector division path.
+For `pto.vdiv`, `precision` names an `DivAlgo` algorithm (see
+[Division algorithms](#division-algorithms)). The three software selectors are
+expanded through SoftLib, which can substantially increase the generated
+instruction count and execution latency; the native selectors keep the ordinary
+vector division path.
 
 **Parameters**:
 

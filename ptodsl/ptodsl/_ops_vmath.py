@@ -112,7 +112,12 @@ def vxor(lhs, rhs, mask):
 
 
 def vdiv(lhs, rhs, mask, *, precision=None):
-    """Element-wise division with optional A5 residual correction."""
+    """Element-wise division with an optional A5 algorithm selector.
+
+    ``precision`` takes an ``DivAlgo`` name: ``intrinsic``,
+    ``diff_compensation``, ``1ulp_ftz_true``, ``0ulp_ftz_true``,
+    ``0ulp_ftz_false`` or ``1ulp_ftz_false``.
+    """
     result = _emit_binary_vec_op(_pto.VdivOp, lhs, rhs, mask)
     if precision is not None:
         precision = _normalize_enum_attr(

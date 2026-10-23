@@ -177,15 +177,15 @@ def _default_precision_type_attr(attr_cls, enum_value, loc=None):
 
 def _install_default_precision_type_compat():
     specs = (
-        ("TDivOp", DivPrecisionAttr, DivPrecision.Default),
-        ("TDivSOp", DivPrecisionAttr, DivPrecision.Default),
+        ("TDivOp", DivPrecisionAttr, DivPrecision.Intrinsic),
+        ("TDivSOp", DivPrecisionAttr, DivPrecision.Intrinsic),
         ("TExpOp", ExpPrecisionAttr, ExpPrecision.Default),
         ("TLogOp", LogPrecisionAttr, LogPrecision.Default),
         ("TRecipOp", RecipPrecisionAttr, RecipPrecision.Default),
-        ("TRowExpandDivOp", DivPrecisionAttr, DivPrecision.Default),
+        ("TRowExpandDivOp", DivPrecisionAttr, DivPrecision.Intrinsic),
         ("TRsqrtOp", RsqrtPrecisionAttr, RsqrtPrecision.Default),
         ("TSqrtOp", SqrtPrecisionAttr, SqrtPrecision.Default),
-        ("TColExpandDivOp", DivPrecisionAttr, DivPrecision.Default),
+        ("TColExpandDivOp", DivPrecisionAttr, DivPrecision.Intrinsic),
     )
     for op_name, attr_cls, enum_value in specs:
         op_cls = getattr(_pto_ops_gen, op_name, None)

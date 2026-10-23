@@ -97,13 +97,25 @@ for (int i = 0; i < N; i++)
 - **inputs:** `%lhs` is the numerator, `%rhs` is the denominator, and `%mask`
   selects active lanes.
 - **outputs:** `%result` is the lane-wise quotient.
-- **precision:** `precisionType = #pto<div_precision high_precision>` selects
-  A5 f32 residual correction. The default is `#pto<div_precision default>`.  
-  High precision requires a `b32` mask. Other element types and targets are
-  rejected for this mode. 
-  Correction compares fused residuals for the native quotient and its adjacent
-  f32 representations; comparisons are strict, so an equal residual keeps the
-  native quotient (the native result is therefore the tie-side choice). Native
+- **precision:** `precisionType` selects the `DivAlgo` algorithm, one of
+  `intrinsic` (default), `diff_compensation`,
+  `precision_1ulp_ftz_true`, `precision_0ulp_ftz_true`,
+  `precision_0ulp_ftz_false` and `precision_1ulp_ftz_false`.
+
+  | Selector | A5 f32 lowering | Requirements |
+  | --- | --- | --- |
+  | `intrinsic` / `precision_1ulp_ftz_true` | one native vector divide | any element type the op supports |
+  | `diff_compensation` | compensated residual search | f32 + `b32` mask |
+  | `precision_0ulp_ftz_true` |  residual search | f32 + `b32` mask |
+  | `precision_0ulp_ftz_false` | normalise + residual search + IEEE rounding | f32 + `b32` mask |
+  | `precision_1ulp_ftz_false` | normalise + single divide + IEEE rounding | f32 + `b32` mask |
+
+  The three software selectors are expanded through SoftLib and reject other
+  element types, other mask granularities and other targets at verification
+  time. 
+  The compensated algorithms compare fused residuals of the native quotient and
+  its two bit neighbours; an equal residual takes the lower neighbour
+  (`z - 1`), matching the reference `vcmp_lt` + `vsel` chain. Native
   zero, infinity and NaN results are preserved,
   including signed zero and target-specific NaN payloads. Subnormal handling
   inherits native vector arithmetic; this mode does not request gradual

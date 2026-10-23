@@ -453,13 +453,7 @@ static std::optional<std::string> getTCvtRoundModeString(pto::TCvtOp op) {
 }
 
 static StringRef getPrecisionTypeString(pto::DivPrecision precision) {
-  switch (precision) {
-  case pto::DivPrecision::Default:
-    return "default";
-  case pto::DivPrecision::HighPrecision:
-    return "high_precision";
-  }
-  llvm_unreachable("unknown DivPrecision");
+  return pto::getDivAlgoToken(precision);
 }
 
 static StringRef getPrecisionTypeString(pto::ExpPrecision precision) {
@@ -513,8 +507,8 @@ static StringRef getPrecisionTypeString(pto::SqrtPrecision precision) {
 }
 
 // MUST stay in sync with template behavior. Adding an op here without a real
-// high_precision code path would silence the warning while preserving default
-// behavior.
+// software-algorithm code path would silence the warning while preserving
+// default behavior.
 static const llvm::StringSet<> &highPrecisionImplementedOps() {
   static const llvm::StringSet<> kImplementedOps{
     "pto.tlog",
@@ -533,18 +527,19 @@ static const llvm::StringSet<> &highPrecisionImplementedOps() {
 // otherwise. Only the first matching op type applies.
 template <typename OpT, typename PrecisionT>
 static std::optional<std::pair<std::string, std::string>>
-tryGetPrecisionTypeAttr(Operation *op, PrecisionT highPrecision) {
+tryGetPrecisionTypeAttr(Operation *op, PrecisionT softwarePrecision) {
   auto typed = dyn_cast<OpT>(op);
   if (!typed) {
     return std::nullopt;
   }
   PrecisionT precision = typed.getPrecisionType();
-  if (precision == highPrecision &&
+  if (precision == softwarePrecision &&
       !highPrecisionImplementedOps().contains(op->getName().getStringRef())) {
     StringRef opName = op->getName().getStringRef();
     llvm::errs() << "warning: '" << opName << "' op " << opName
-                 << ": precisionType = high_precision requested but not yet "
-                    "implemented; falling back to default behavior\n";
+                 << ": precisionType = " << getPrecisionTypeString(precision)
+                 << " requested but not yet implemented; falling back to "
+                    "default behavior\n";
   }
   return std::pair<std::string, std::string>(
       "precisionType", getPrecisionTypeString(precision).str());
@@ -661,13 +656,13 @@ static void appendPrecisionAttrs(
       (precisionAttr = tryGetPrecisionTypeAttr<pto::TRsqrtOp>(
            op, pto::RsqrtPrecision::HighPrecision)) ||
       (precisionAttr = tryGetPrecisionTypeAttr<pto::TDivOp>(
-           op, pto::DivPrecision::HighPrecision)) ||
+           op, pto::DivPrecision::Precision0UlpFtzTrue)) ||
       (precisionAttr = tryGetPrecisionTypeAttr<pto::TDivSOp>(
-           op, pto::DivPrecision::HighPrecision)) ||
+           op, pto::DivPrecision::Precision0UlpFtzTrue)) ||
       (precisionAttr = tryGetPrecisionTypeAttr<pto::TRowExpandDivOp>(
-           op, pto::DivPrecision::HighPrecision)) ||
+           op, pto::DivPrecision::Precision0UlpFtzTrue)) ||
       (precisionAttr = tryGetPrecisionTypeAttr<pto::TColExpandDivOp>(
-           op, pto::DivPrecision::HighPrecision))) {
+           op, pto::DivPrecision::Precision0UlpFtzTrue))) {
     attrs.emplace_back(std::move(*precisionAttr));
   }
 }

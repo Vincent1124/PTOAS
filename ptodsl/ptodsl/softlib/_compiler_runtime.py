@@ -60,20 +60,80 @@ def _resolve_integer_vdiv_request(specs):
     return module_name, helper, arg_types, [vreg]
 
 
-def _resolve_high_precision_vdiv_request(target, specs):
+_F32_DIV_ALGO_HELPERS = {
+    # DIFF_COMPENSATION maps to the compensated DivPrecisionImpl in the FTZ
+    # build of the AscendC reference, i.e. the same sequence as 0-ULP FTZ-true.
+    "diff_compensation": "div_vf32_soft",
+    "precision_0ulp_ftz_true": "div_vf32_soft",
+    "precision_0ulp_ftz_false": "div_vf32_ulp0_ftz_false",
+    "precision_1ulp_ftz_false": "div_vf32_ulp1_ftz_false",
+}
+
+
+# Canonical IR mnemonics. Only the ULP variants carry a ``precision_`` prefix.
+_DIV_ALGO_TOKENS = frozenset({
+    "intrinsic",
+    "diff_compensation",
+    "precision_1ulp_ftz_true",
+    "precision_0ulp_ftz_true",
+    "precision_0ulp_ftz_false",
+    "precision_1ulp_ftz_false",
+})
+
+# Accepted shorthands -> canonical mnemonic.
+_DIV_ALGO_SHORTHANDS = {
+    "0ulp_ftz_true": "precision_0ulp_ftz_true",
+    "0ulp_ftz_false": "precision_0ulp_ftz_false",
+    "1ulp_ftz_true": "precision_1ulp_ftz_true",
+    "1ulp_ftz_false": "precision_1ulp_ftz_false",
+    "ulp0_ftz_true": "precision_0ulp_ftz_true",
+    "ulp0_ftz_false": "precision_0ulp_ftz_false",
+    "ulp1_ftz_true": "precision_1ulp_ftz_true",
+    "ulp1_ftz_false": "precision_1ulp_ftz_false",
+}
+
+
+def _normalize_algo_token(token):
+    """Return the IR mnemonic for a DivAlgo token or one of its shorthands."""
+    text = str(token).strip().lower().replace("-", "_")
+    if text in _DIV_ALGO_TOKENS:
+        return text
+    return _DIV_ALGO_SHORTHANDS.get(text, text)
+
+
+def _resolve_software_vdiv_request(target, specs):
+    algo = _normalize_algo_token(specs.get("precision"))
     if target != "a5" or specs.get("dtype") != "f32" or specs.get("mask") != "b32":
-        raise ValueError("high-precision vector division currently requires A5 f32 with b32 mask")
-    from SoftOps.div_vector import div_vf32_soft
+        raise ValueError(
+            f"{algo} vector division currently requires A5 f32 with b32 mask"
+        )
+    helper_name = _F32_DIV_ALGO_HELPERS.get(algo)
+    if helper_name is None:
+        raise ValueError(f"unsupported vector division algorithm: {algo!r}")
+    module = importlib.import_module("SoftOps.div_vector")
+    helper = getattr(module, helper_name)
 
     vector = vreg_type(int(specs["lanes"]), pto.f32)
-    return "div_vf32_soft", div_vf32_soft, [vector, vector, mask_type("b32")], [vector]
+    return helper_name, helper, [vector, vector, mask_type("b32")], [vector]
 
 
-def _resolve_high_precision_divf_request(target):
+# Scalar division only supports the native divide and the correctly-rounded
+# SoftOps path; the vector FTZ-false algorithms have no scalar counterpart.
+_SCALAR_DIV_ALGOS = {"precision_0ulp_ftz_true": "div_f32_soft"}
+
+
+def _resolve_scalar_div_request(target, specs):
+    algo = _normalize_algo_token(specs.get("precision"))
     if target != "a5":
-        raise ValueError("high-precision scalar division requires target A5")
-    helper = getattr(importlib.import_module("SoftOps"), "div_f32_soft")
-    return "div_f32_soft", helper, [pto.f32, pto.f32], [pto.f32]
+        raise ValueError("scalar precision division requires target A5")
+    helper_name = _SCALAR_DIV_ALGOS.get(algo)
+    if helper_name is None:
+        raise ValueError(
+            f"{algo} is not supported for scalar division; use intrinsic or "
+            "precision_0ulp_ftz_true"
+        )
+    helper = getattr(importlib.import_module("SoftOps"), helper_name)
+    return helper_name, helper, [pto.f32, pto.f32], [pto.f32]
 
 
 def _resolve_trig_request(op):
@@ -85,10 +145,10 @@ def _resolve_trig_request(op):
 def _resolve_softlib_request(target, op, specs):
     if op == "pto.vdiv" and specs.get("dtype") in _INTEGER_VDIV_DTYPES:
         return _resolve_integer_vdiv_request(specs)
-    if op == "pto.vdiv" and specs.get("precision") == "high_precision":
-        return _resolve_high_precision_vdiv_request(target, specs)
-    if op == "pto.divf" and specs == {"dtype": "f32", "precision": "high_precision"}:
-        return _resolve_high_precision_divf_request(target)
+    if op == "pto.vdiv" and _normalize_algo_token(specs.get("precision")) in _F32_DIV_ALGO_HELPERS:
+        return _resolve_software_vdiv_request(target, specs)
+    if op == "pto.divf" and specs.get("precision"):
+        return _resolve_scalar_div_request(target, specs)
     if op in {"pto.sin", "pto.cos"}:
         return _resolve_trig_request(op)
     raise ValueError(f"no SoftOps implementation registered for {target}:{op}:{specs}")

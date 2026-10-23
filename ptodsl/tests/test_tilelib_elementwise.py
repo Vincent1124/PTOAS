@@ -1086,7 +1086,7 @@ class TileLibElementwiseTest(unittest.TestCase):
         cases = (
             ("default", ("pto.vdiv",)),
             (
-                "high_precision",
+                "precision_0ulp_ftz_false",
                 (
                     "pto.vdiv",
                     "pto.vbitcast",
@@ -1463,7 +1463,7 @@ class TileLibElementwiseTest(unittest.TestCase):
             ),
         )
         for specs, expected_name in cases:
-            for precision_type in ("default", "high_precision"):
+            for precision_type in ("default", "precision_0ulp_ftz_false"):
                 with self.subTest(
                     operand_order=tuple(specs),
                     precision_type=precision_type,
@@ -1485,7 +1485,7 @@ class TileLibElementwiseTest(unittest.TestCase):
                     self.assertEqual(mlir.count("scf.for"), 1)
                     self.assertIn("pto.vbr", mlir)
                     self.assertIn("pto.vdiv", mlir)
-                    if precision_type == "high_precision":
+                    if precision_type == "precision_0ulp_ftz_false":
                         self.assertIn("pto.vbitcast", mlir)
                         self.assertIn("pto.vcmp", mlir)
 

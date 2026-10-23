@@ -43,9 +43,12 @@ pto.<op> ins(%src0, %src1 : !pto.tile_buf<...>, !pto.tile_buf<...>)
 - The valid region must match across all three tiles.
 - Element type legality is target-defined; ops specialize over the tile dtype selected at expansion time.
 - `pto.tdiv` uses element-wise division; **undefined behavior** on divide-by-zero.
-- `pto.tdiv` additionally accepts `precisionType = #pto<div_precision default|high_precision>`.
-  Omitted means `default`.
-  `high_precision` is currently legal only when the tile element type is `f16` or `f32`.
+- `pto.tdiv` additionally accepts any `DivAlgo` selector through
+  `precisionType = #pto<div_precision ...>`; omitted means `intrinsic`. The
+  software algorithms expand pointwise and need no `tmp` operand: `f32` supports
+  `diff_compensation`, `precision_0ulp_ftz_true`, `precision_0ulp_ftz_false` and
+  `precision_1ulp_ftz_false`, while `f16` supports only `precision_1ulp_ftz_false`
+  (the 0-ULP algorithms are f32-only, matching AscendC).
 
 **Example:**
 
@@ -83,11 +86,11 @@ For `pto.tdivs`:
 ```mlir
 pto.tdivs ins(%src, %scalar : !pto.tile_buf<...>, <scalar_type>)
           outs(%dst : !pto.tile_buf<...>)
-          {precisionType = #pto<div_precision high_precision>}
+          {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
 
 pto.tdivs ins(%scalar, %src : <scalar_type>, !pto.tile_buf<...>)
           outs(%dst : !pto.tile_buf<...>)
-          {precisionType = #pto<div_precision high_precision>}
+          {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
 ```
 
 **Parameter Table:**
@@ -103,9 +106,12 @@ pto.tdivs ins(%scalar, %src : <scalar_type>, !pto.tile_buf<...>)
 - `src` and `dst` must be shape-compatible `loc=vec` tile buffers.
 - The scalar element type must be compatible with the tile element type.
 - `pto.tdivs` is the only scalar family with two public operand orders. **Undefined behavior** on divide-by-zero (either `scalar==0` or any `src[i,j]==0` in the `scalar/src` form).
-- `pto.tdivs` additionally accepts `precisionType = #pto<div_precision default|high_precision>`.
-  Omitted means `default`.
-  `high_precision` is currently legal only when the tile element type is `f16` or `f32`.
+- `pto.tdivs` additionally accepts any `DivAlgo` selector through
+  `precisionType = #pto<div_precision ...>`; omitted means `intrinsic`. The
+  software algorithms expand pointwise and need no `tmp` operand: `f32` supports
+  `diff_compensation`, `precision_0ulp_ftz_true`, `precision_0ulp_ftz_false` and
+  `precision_1ulp_ftz_false`, while `f16` supports only `precision_1ulp_ftz_false`
+  (the 0-ULP algorithms are f32-only, matching AscendC).
 
 **Example:**
 

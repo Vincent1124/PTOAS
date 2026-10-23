@@ -132,9 +132,13 @@ pto.<op> ins(%src0, %src1 : !pto.tile_buf<...>, !pto.tile_buf<...>)
 - On A5, `pto.trowexpanddiv` also accepts matching `bf16`, `ui8`, `ui16`, and `ui32` tiles;
   unsigned integer division truncates toward zero and requires a nonzero divisor.
 - `pto.trowexpandexpdif` is floating-point-only (`f16` or `f32`).
-- `pto.trowexpanddiv` additionally accepts `precisionType = #pto<div_precision default|high_precision>`.
-  Omitted means `default`.
-  `high_precision` requires floating-point element type and an explicit `tmp` operand.
+- `pto.trowexpanddiv` additionally accepts any `DivAlgo` selector through
+  `precisionType = #pto<div_precision ...>`. Omitted means `intrinsic` (one native
+  vector divide). The software algorithms (`diff_compensation`,
+  `precision_0ulp_ftz_true`, `precision_0ulp_ftz_false`, `precision_1ulp_ftz_false`)
+  expand to the same pointwise sequences as `pto.tdiv`, so they need no `tmp`
+  operand and only apply to the element types listed for `pto.tdiv` (f32 for the
+  0-ULP variants).
 
 **Example:**
 
@@ -156,7 +160,7 @@ pto.trowexpanddiv ins(%src0, %src1, %tmp : !pto.tile_buf<vec, 16x128xf32>,
                                              !pto.tile_buf<vec, 16x1xf32, blayout=col_major>,
                                              !pto.tile_buf<vec, 16x128xf32>)
                   outs(%dst : !pto.tile_buf<vec, 16x128xf32>)
-                  {precisionType = #pto<div_precision high_precision>}
+                  {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
 ```
 
 ---
@@ -242,7 +246,9 @@ pto.<op> ins(%src0, %src1 : !pto.tile_buf<...>, !pto.tile_buf<...>)
   `i16`, and `i32` tiles; integer division truncates toward zero and requires a
   nonzero divisor.
 - `pto.tcolexpandexpdif` is floating-point-only (`f16` or `f32`).
-- `pto.tcolexpanddiv` additionally accepts `precisionType = #pto<div_precision default|high_precision>`.
+- `pto.tcolexpanddiv` additionally accepts any `DivAlgo` selector through
+  `precisionType = #pto<div_precision ...>`; the selector behaves exactly as for
+  `pto.trowexpanddiv` and needs no `tmp` operand.
   Omitted means `default`.
   `high_precision` is currently legal only when the tile element type is `f16` or `f32`.
 
@@ -258,5 +264,5 @@ pto.tcolexpandadd ins(%src0, %src1 : !pto.tile_buf<vec, 16x128xf32>,
 pto.tcolexpanddiv ins(%src0, %src1 : !pto.tile_buf<vec, 16x128xf32>,
                                      !pto.tile_buf<vec, 1x128xf32>)
                   outs(%dst : !pto.tile_buf<vec, 16x128xf32>)
-                  {precisionType = #pto<div_precision high_precision>}
+                  {precisionType = #pto<div_precision precision_0ulp_ftz_false>}
 ```
