@@ -26,7 +26,7 @@
 | 18 | `pto.vmi.vxor` | 3: Eltwise | A | Elementwise bitwise XOR |
 | 19 | `pto.vmi.vnot` | 3: Eltwise | A | Elementwise bitwise NOT |
 | 20 | `pto.vmi.vshl` | 3: Eltwise | A | Elementwise left shift |
-| 21 | `pto.vmi.vshr` | 3: Eltwise | A | Elementwise right shift (arithmetic for signed, logical for unsigned) |
+| 21 | `pto.vmi.vshr` | 3: Eltwise | A | Elementwise right shift (arithmetic for signed, logical for unsigned and signless) |
 | 22 | `pto.vmi.vadds` | 3: Eltwise | A | Vector-scalar add |
 | 23 | `pto.vmi.vmuls` | 3: Eltwise | A | Vector-scalar multiply |
 | 24 | `pto.vmi.vmaxs` | 3: Eltwise | A | Vector-scalar maximum |

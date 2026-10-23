@@ -6,6 +6,11 @@
 > are per-lane, dtype-preserving ops that do not change vreg layout — the output
 > has the same `L` and `T` as the inputs. Commonly used for real+imaginary and
 > value+index interleaving within a single vector register.
+>
+> Both ops pair lanes through `L/2` loop iterations (see the pseudocode), so
+> `L` must be even. On the PTODSL public surface the legal lane counts for
+> these two ops are `2/4/8/64/128/256`; a one-lane vector is not a legal
+> input.
 
 
 ---

@@ -115,7 +115,7 @@ lowering; PTODSL does not expose layout selection on `pto.vmi.vreg(...)` or
 | Layout | Description |
 |--------|-------------|
 | `contiguous` (default) | Stride-1 mapping: lane `i` sits at position `i mod (2048/bitwidth(T))` within physical register `⌊i / (2048/bitwidth(T))⌋` |
-| `deinterleaved` | Parity split: EVEN lanes occupy the first `K/2` physical registers, ODD lanes occupy the second `K/2`. This is the natural output layout of a widening `vcvt` (e.g., `f16 → f32`) or `vdintlv` |
+| `deinterleaved` | Parity split: EVEN lanes occupy the first `K/2` physical registers, ODD lanes occupy the second `K/2`. This is the natural output layout of a widening `vcvt` (e.g., `f16 → f32`) |
 
 Layouts are a lowering concern managed by `ptoas`. The system
 propagates layouts automatically through Category A ops (most elementwise
@@ -499,12 +499,69 @@ out = pto.vmi.vmul(scale, data, full_mask)
 - The result type is inferred from `lhs`.
 - For bitwise ops (`vand`, `vor`, `vxor`, `vshl`, `vshr`), integer element
   types are expected. Floating-point usage is rejected.
-- `vshr` performs arithmetic right shift for signed element types and logical
-  right shift for unsigned element types.
+- `vshr` performs arithmetic right shift for signed element types (`si*`) and
+  logical right shift for unsigned (`ui*`) and signless (`i*`) element types.
+- `vdiv` supports floating-point element types only: `f16` and `f32`. Integer
+  division is not available through this shared signature group.
 
 ---
 
-### 14.4.2 Unary vector
+### 14.4.2 Carry-chain integer arithmetic
+
+#### `pto.vmi.vaddc(lhs, rhs, mask) -> (VRegType, MaskType)`
+#### `pto.vmi.vsubc(lhs, rhs, mask) -> (VRegType, MaskType)`
+#### `pto.vmi.vaddcs(lhs, rhs, carry_in, mask) -> (VRegType, MaskType)`
+#### `pto.vmi.vsubcs(lhs, rhs, carry_in, mask) -> (VRegType, MaskType)`
+
+**Description**: 32-bit integer add / subtract with a per-lane carry predicate
+as a second result. Every call returns a pair `(value, carry)`:
+
+- `vaddc` returns `(sum, carry)`: `carry[i] = 1` when lane `i`'s addition
+  produced a carry out of bit 31.
+- `vsubc` returns `(difference, borrow_free)` with **not-borrow** semantics:
+  the comparison is unsigned, `carry[i] = 1` means no borrow occurred, and
+  `carry[i] = 0` means a borrow occurred.
+- `vaddcs` / `vsubcs` additionally consume a `carry_in` mask so several lanes
+  or words can be chained into multi-precision arithmetic. In `vsubcs`, each
+  lane computes `lhs[i] - rhs[i] - (1 - carry_in[i])`; a carry-in of 0
+  propagates a borrow, and the carry-out uses the same not-borrow encoding.
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `lhs` | `VRegType` | First 32-bit integer operand vector |
+| `rhs` | `VRegType` | Second operand vector, identical type to `lhs` |
+| `carry_in` | VMI mask | Carry input mask (`vaddcs` / `vsubcs` only) |
+| `mask` | VMI mask | **Required.** Predicate mask gating lane participation |
+
+**Returns**:
+
+| Return Value | Type | Description |
+|--------------|------|-------------|
+| `value` | `VRegType` | Sum / difference vector, same type as `lhs` |
+| `carry` | VMI mask | Per-lane carry (or not-borrow) output, same lane count as the data vectors |
+
+**Example**:
+
+```python
+sum0, carry = pto.vmi.vaddc(lo_words_a, lo_words_b, mask)
+sum1, carry2 = pto.vmi.vaddcs(hi_words_a, hi_words_b, carry, mask)
+diff, borrow_free = pto.vmi.vsubc(a, b, mask)
+```
+
+**Constraints**:
+- `lhs` and `rhs` must be identical 32-bit integer VMI vectors (`i32`, `si32`,
+  or `ui32` elements).
+- `mask`, `carry`, and `carry_in` all use the same logical lane count and
+  layout as the data vectors, and all physical mask parts use `b32`
+  granularity.
+- `carry_in` must have the identical VMI mask type as `mask`.
+- These operations do not take `pmode`; the carry output follows the mask.
+
+---
+
+### 14.4.3 Unary vector
 
 #### `pto.vmi.vabs(source, mask=None, *, pmode=None) -> VRegType`
 #### `pto.vmi.vneg(source, mask=None, *, pmode=None) -> VRegType`
@@ -513,35 +570,43 @@ out = pto.vmi.vmul(scale, data, full_mask)
 #### `pto.vmi.vln(source, mask=None, *, pmode=None) -> VRegType`
 #### `pto.vmi.vsqrt(source, mask=None, *, pmode=None) -> VRegType`
 #### `pto.vmi.vnot(source, mask=None, *, pmode=None) -> VRegType`
+#### `pto.vmi.vnot(source) -> MaskType` (predicate complement form)
 
 **Description**: Element-wise unary operation: `result[i] = op(source[i])` for
 active lanes. `vrelu` = `max(0, x)`, `vnot` = bitwise NOT (integer types
 only).
 
+`vnot` has a second, predicate form: when `source` is a VMI mask value,
+`pto.vmi.vnot(source)` returns the per-lane predicate complement as a mask
+(`result[i] = 1 - source[i]`). In this form the operand and the result are
+both masks, and a governing `mask` argument and `pmode` are not accepted —
+passing either is an error.
+
 **Parameters**:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `source` | `VRegType` | Input vector |
-| `mask` | VMI mask or `None` | Optional predicate mask gating lane participation |
-| `pmode` | `str` or `None` | Optional predicate mode: `"zero"` writes 0 to predicate-inactive lanes |
+| `source` | `VRegType` or VMI mask | Input vector; a mask value selects the predicate complement form |
+| `mask` | VMI mask or `None` | Optional predicate mask gating lane participation (vector form only) |
+| `pmode` | `str` or `None` | Optional predicate mode: `"zero"` writes 0 to predicate-inactive lanes (vector form only) |
 
 **Returns**:
 
 | Return Value | Type | Description |
 |--------------|------|-------------|
-| `result` | `VRegType` | Result vector (same shape and element type as `source`) |
+| `result` | `VRegType` or VMI mask | Result vector, or the complement mask in the predicate form |
 
 **Example**:
 
 ```python
 activated = pto.vmi.vrelu(src, mask)
 inverted = pto.vmi.vnot(int_vec)
+inv_pred = pto.vmi.vnot(sel_mask)  # predicate complement: MaskType -> MaskType
 ```
 
 ---
 
-### 14.4.3 Vector-scalar
+### 14.4.4 Vector-scalar
 
 Formal `pto.vmi` vector-scalar ops in VMI v0.1:
 
@@ -1111,15 +1176,15 @@ as `vdhist` but each bin accumulates the sum of counts for all bins ≤ its inde
 ### `pto.vmi.vgather(source, offsets, mask, *, pmode=None) -> VRegType`
 
 **Description**: Indexed gather from a UB pointer using per-lane element
-offsets. Only masked-on lanes participate; masked-off lanes produce an
-unspecified value.
+offsets. Only masked-on lanes participate; masked-off lanes are written as 0
+(zero fill), consistent with `pmode="zero"`.
 
 **Parameters**:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `source` | `PtrType` (ub) | UB source pointer |
-| `offsets` | `VRegType` | Per-lane element offsets (integer VMI vector) |
+| `offsets` | `VRegType` | Per-lane element offsets. 32-bit integer offsets (`i32`/`ui32`) select the B32 path; 16-bit integer offsets (`i16`/`ui16`) select the B16 path |
 | `mask` | VMI mask | **Required.** Predicate mask gating lane participation |
 | `pmode` | `str` or `None` | Optional predicate mode: `"zero"` writes 0 to predicate-inactive lanes |
 
@@ -1132,6 +1197,11 @@ unspecified value.
 **Constraints**:
 - PTODSL infers the result lane count from `offsets` and the element type
   from `source`.
+- The offset element width selects the gather path: B32 (`i32`/`ui32`
+  offsets) gathers `i32`/`ui32`/`f32` elements; B16 (`i16`/`ui16` offsets)
+  gathers `i16`/`ui16`/`f16`/`bf16` elements. 8-bit integer sources are
+  gathered through the B16 path with zero extension: an `i8` source yields an
+  `i16` result and a `ui8` source yields a `ui16` result.
 
 ---
 
@@ -1257,14 +1327,23 @@ group_mask = pto.vmi.create_mask(
 ## 14.10 Data rearrangement
 
 Rearrangement instructions reorganize data between VMI vector registers
-without touching memory. They are used to switch between interleaved and
-deinterleaved data layouts.
+without touching memory. Both instructions are layout-transparent: the
+outputs keep the lane count, element type, and vreg layout of the inputs.
+They permute lane positions within the logical data stream; they do not
+switch the vreg layout itself.
 
 ### `pto.vmi.vintlv(lhs, rhs, mask, *, pmode=None) -> (VRegType, VRegType)`
 
 **Description**: Interleave two logical vectors lane-by-lane and return the
 result as a pair: `low` contains the interleaved lower half, `high` contains
-the upper half.
+the upper half. For `i` in `[0, L/2)`:
+
+```text
+low[2*i]     = lhs[i]
+low[2*i + 1] = rhs[i]
+high[2*i]     = lhs[L/2 + i]
+high[2*i + 1] = rhs[L/2 + i]
+```
 
 **Parameters**:
 
@@ -1287,7 +1366,14 @@ the upper half.
 
 **Description**: Deinterleave a previously interleaved vector pair. This is
 the inverse of `vintlv`: it separates even-positioned and odd-positioned lanes
-of the logical input stream into two output vectors.
+of the logical input stream into two output vectors. For `i` in `[0, L/2)`:
+
+```text
+even[i]       = lhs[2*i]
+even[L/2 + i] = rhs[2*i]
+odd[i]        = lhs[2*i + 1]
+odd[L/2 + i]  = rhs[2*i + 1]
+```
 
 **Parameters**:
 
@@ -1313,6 +1399,9 @@ even, odd = pto.vmi.vdintlv(lo, hi, mask)
 
 **Constraints**:
 - `lhs` and `rhs` must have the same type.
+- The `L/2` pairing above requires `L` to be even. The legal lane counts for
+  `vintlv` and `vdintlv` are `2`, `4`, `8`, `64`, `128`, and `256`; a
+  one-lane vector is not a legal input for these two instructions.
 - The two returned vectors form one logical interleaved pair. Preserve their
   order when passing them to subsequent ops.
 
@@ -1328,6 +1417,8 @@ surface no longer asks you to spell the full result type manually.
 
 - Same-shape elementwise binary and unary ops: inferred from the first vector
   operand.
+- `vaddc` / `vsubc` / `vaddcs` / `vsubcs`: inferred from `lhs`, returning a
+  `(value, carry)` pair whose carry mask matches the data lane count.
 - Vector-scalar ops: inferred from the source vector.
 - `vci` / `vbrc`: inferred from the typed scalar or vector input plus `size`
   (and `group` for grouped broadcast).
@@ -1425,9 +1516,10 @@ def vmi_elementwise(
 | Category | Instructions |
 |----------|-------------|
 | Types | `vreg`, `mask` |
-| Load / Store | `vload`, `vstore`, `vsstb` |
+| Load / Store | `vload`, `vstore` |
 | Index / Broadcast | `vci`, `vbrc` |
 | Binary vector-vector | `vadd`, `vsub`, `vmul`, `vdiv`, `vmax`, `vmin`, `vand`, `vor`, `vxor`, `vshl`, `vshr` |
+| Carry-chain integer | `vaddc`, `vsubc`, `vaddcs`, `vsubcs` |
 | Unary vector | `vabs`, `vneg`, `vrelu`, `vexp`, `vln`, `vsqrt`, `vnot` |
 | Vector-scalar | `pto.vmi.vadd(vector, scalar, mask)` emits `vadds`; other formal `pto.vmi` helpers are `vmuls`, `vmaxs`, `vmins`, `vshls`, `vshrs`; DSL convenience: `vsubs`, `vands`, `vors`, `vxors` |
 | Compare / Select | `vcmp`, `vcmps`, `vsel`, `vselr` |

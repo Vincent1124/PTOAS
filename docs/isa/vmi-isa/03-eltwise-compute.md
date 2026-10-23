@@ -323,14 +323,16 @@ borrow occurred. In `vsubcs`, a carry-in of 0 propagates a borrow.
   for (int i = 0; i < L; i++)
       dst[i] = mask[i] ? (lhs[i] << rhs[i]) : 0;  // vshl
   for (int i = 0; i < L; i++)
-      dst[i] = mask[i] ? (lhs[i] >> rhs[i]) : 0;  // vshr (signed: arithmetic; unsigned: logical)
+      dst[i] = mask[i] ? (lhs[i] >> rhs[i]) : 0;  // vshr (signed: arithmetic; unsigned and signless: logical)
   ```
 
 - **syntax:**
   ```mlir
   %r = pto.vmi.vshl %lhs, %rhs, %mask : !pto.vmi.vreg<L×T>, !pto.vmi.vreg<L×T>, !pto.vmi.mask<L> -> !pto.vmi.vreg<L×T>
   ```
-- **datatypes:** `si8`/`si16`/`si32` and `ui8`/`ui16`/`ui32`
+- **datatypes:** `si8`/`si16`/`si32`, `ui8`/`ui16`/`ui32`, and signless
+  `i8`/`i16`/`i32`. In `vshr`, signed elements use arithmetic right shift,
+  while unsigned and signless elements use logical right shift.
 - **lowering to `pto.mi`:**
   ```
   K × pto.vshl / pto.vshr
@@ -412,10 +414,11 @@ scalar type must match the vector element type.
   ```mlir
   %r = pto.vmi.vshls %src, %shift, %mask : !pto.vmi.vreg<L×T>, i16, !pto.vmi.mask<L> -> !pto.vmi.vreg<L×T>
   ```
-- **datatypes:** `si8`/`si16`/`si32` and `ui8`/`ui16`/`ui32`. The uniform shift
-  amount is a `ui16` value independent of `T` and should be in the
-  range `[0, bitwidth(T))`. For `vshrs`, signed elements use arithmetic right
-  shift, while unsigned and signless elements use logical right shift.
+- **datatypes:** `si8`/`si16`/`si32`, `ui8`/`ui16`/`ui32`, and signless
+  `i8`/`i16`/`i32`. The uniform shift amount is a signless `i16` value
+  independent of `T` and should be in the range `[0, bitwidth(T))`. For
+  `vshrs`, signed elements use arithmetic right shift, while unsigned and
+  signless elements use logical right shift.
 - **lowering to `pto.mi`:**
   ```
   K × pto.vshls / pto.vshrs
@@ -659,9 +662,12 @@ scalar type must match the vector element type.
 
 ---
 
-## 3.7 Borrow Ops (Not Provided)
+## 3.7 i64 Borrow Arithmetic (Not Provided)
 
-borrow arithmetic  is **not provided** on the current surface. It will be added directly
-as `i64` element-wise ops once the `i64` support plan is finalized and the
-hardware path is confirmed. Until then, widening to `i64` scalar emulation
-or fusing at the `pto.mi` layer is the workaround.
+**64-bit** borrow arithmetic is **not provided** on the current surface. It
+will be added directly as `i64` element-wise ops once the `i64` support plan
+is finalized and the hardware path is confirmed. This section refers only to
+that future `i64` widening surface; it does not affect the per-lane 32-bit
+`vsubc` / `vsubcs` defined in 3.1, whose not-borrow outputs are already
+available. Until `i64` arrives, widening to `i64` scalar emulation or fusing
+at the `pto.mi` layer is the workaround.
