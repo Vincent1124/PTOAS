@@ -10,10 +10,10 @@
 
 module {
   func.func @vmi_to_vpto_ensure_layout_partial_invalid(
-      %input: !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 4>>) {
+      %input: !pto.vmi.vreg<129xf32, #pto.vmi.layout<deinterleaved = 4>>) {
     %dense = pto.vmi.ensure_layout %input
-        : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 4>>
-        -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>>
+        : !pto.vmi.vreg<129xf32, #pto.vmi.layout<deinterleaved = 4>>
+        -> !pto.vmi.vreg<129xf32, #pto.vmi.layout<contiguous>>
     return
   }
 }

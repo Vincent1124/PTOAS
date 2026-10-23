@@ -45,6 +45,7 @@ class KernelModuleSpec:
     source_line: int | None = None
     jit_source: str | None = None
     native_options: NativeBuildOptions = EMPTY_NATIVE_OPTIONS
+    ptoas_flags: tuple[str, ...] = ()
 
 
 def _build_flat_aicore_module(spec: KernelModuleSpec, arg_types):

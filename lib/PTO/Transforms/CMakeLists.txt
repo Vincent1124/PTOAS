@@ -30,6 +30,7 @@ set(_ptoas_vmi_split_units
   VMIToVPTO/VMIToVPTOMemoryInternals.cpp
   VMIToVPTO/VMIToVPTOMaskInternals.cpp
   VMIToVPTO/VMIToVPTODataLayoutInternals.cpp
+  VMIToVPTO/VMIToVPTOMaskLayoutInternals.cpp
   VMIToVPTO/VMIToVPTOUnifiedMaskInternals.cpp
   VMIToVPTO/VMIToVPTOPatternInternals0.cpp
   VMIToVPTO/VMIToVPTOPatternInternals1.cpp
@@ -136,16 +137,29 @@ add_mlir_dialect_library(PTOTransforms
   VMI/VMILowerUnifiedToLegacy.cpp
   VMI/VMINormalizeSignlessIntToUnsigned.cpp
   VMI/VMILayoutRematerializeWeakProducers.cpp
+  VMI/VMILayoutStructuralAssignment.cpp
   VMI/VMILayoutAssignment.cpp
   VMI/VMILayoutSpineAnalysis.cpp
   VMI/VMILayoutFold.cpp
   VMI/VMILayoutPropagation.cpp
+  VMI/VMILayoutConflictSolver.cpp
+  VMI/VMILayoutCostGraph.cpp
+  VMI/VMILayoutCostOperations.cpp
+  VMI/VMILayoutCostMaterialization.cpp
+  VMI/VMILayoutCostModel.cpp
   VMI/VMILayoutSupport.cpp
   VMI/VMILayoutSupportAlignment.cpp
   VMI/VMILayoutSupportBF16.cpp
   VMI/VMILayoutSupportGroupSlots.cpp
   VMI/VMILayoutRematerialize.cpp
   VMI/VMILayoutSinkMaterialization.cpp
+  VMI/VMILayoutOpClasses.cpp
+  VMI/VMILayoutRelations.cpp
+  VMI/VMILayoutCasts.cpp
+  VMI/VMILayoutMemory.cpp
+  VMI/VMILayoutArithmetic.cpp
+  VMI/VMILayoutPlanner.cpp
+  VMI/VMILayoutComponentGraph.cpp
   VMIToVPTO/VMIToVPTO.cpp
   ${_ptoas_vmi_split_units}
   VPTO/VPTOStatefulStreamFusion.cpp
@@ -283,6 +297,7 @@ add_mlir_dialect_library(PTOTransforms
   Passes/PTOMaterializeTileOpSections.cpp
   VPTO/VPTONormalizeContainer.cpp
   VPTO/VPTOSplitCVModule.cpp
+  VPTO/VPTOPack4StoreMaskNormalize.cpp
   InsertSync/PTOIRTranslator.cpp
   InsertSync/SyncMacroModel.cpp
   InsertSync/SyncCommon.cpp

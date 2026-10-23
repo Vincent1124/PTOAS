@@ -1,0 +1,59 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: split-file %s %t
+// RUN: mkdir -p %t.cann/bin %t.cann/tools/bisheng_compiler/bin
+// RUN: printf '#!/bin/sh\nexit 1\n' > %t.cann/bin/bisheng
+// RUN: chmod +x %t.cann/bin/bisheng
+// RUN: cp %t.cann/bin/bisheng %t.cann/bin/cce-ld
+// RUN: cp %t.cann/bin/bisheng %t.cann/bin/ld.lld
+// RUN: cp %t.cann/bin/bisheng %t.cann/tools/bisheng_compiler/bin/bisheng
+// RUN: not env ASCEND_HOME_PATH=%t.cann ptoas --pto-arch=a5 --pto-backend=vpto %t/strided.pto -o %t.strided.o 2>&1 | FileCheck %s --check-prefix=STRIDED
+// RUN: not env ASCEND_HOME_PATH=%t.cann ptoas --pto-arch=a5 --pto-backend=vpto %t/dense.pto -o %t.dense.o 2>&1 | FileCheck %s --check-prefix=DENSE
+
+// Only block-strided modules need protection against CANN's elimination of
+// loads with distinct strides from the same UB base. Check the real argv.
+// STRIDED: Error: device LLVM compilation failed
+// STRIDED: Command:
+// STRIDED-SAME: -mllvm --cce-vf-enable-vf-ldst-elimination=false
+// DENSE: Error: device LLVM compilation failed
+// DENSE: Command:
+// DENSE-NOT: --cce-vf-enable-vf-ldst-elimination
+// DENSE: -x ir
+
+//--- strided.pto
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @copy(%src: !pto.ptr<f32, ub>, %dst: !pto.ptr<f32, ub>) attributes {pto.kernel} {
+    %c0 = arith.constant 0 : index
+    %c0_i16 = arith.constant 0 : i16
+    %c3_i16 = arith.constant 3 : i16
+    pto.vecscope {
+      %mask = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+      %value = pto.vsldb %src, %c3_i16, %c0_i16, %mask
+          : !pto.ptr<f32, ub>, i16, i16, !pto.mask<b32> -> !pto.vreg<64xf32>
+      pto.vsts %value, %dst[%c0], %mask : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+    }
+    return
+  }
+}
+
+//--- dense.pto
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @copy(%src: !pto.ptr<f32, ub>, %dst: !pto.ptr<f32, ub>) attributes {pto.kernel} {
+    %c0 = arith.constant 0 : index
+    %c0_i16 = arith.constant 0 : i16
+    %c3_i16 = arith.constant 3 : i16
+    pto.vecscope {
+      %mask = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+      %value = pto.vlds %src[%c0] {dist = "NORM"}
+          : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+      pto.vsts %value, %dst[%c0], %mask : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+    }
+    return
+  }
+}

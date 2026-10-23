@@ -139,6 +139,8 @@ extern llvm::cl::opt<bool> checkSyncInterference;
 extern llvm::cl::opt<bool> checkSyncSelfCoverage;
 extern llvm::cl::opt<bool> enableInsertSync;
 extern llvm::cl::opt<bool> enableVmiFastmath;
+extern llvm::cl::opt<unsigned> vmiLayoutMaxFrontierEntries;
+extern llvm::cl::opt<unsigned> vmiLayoutMaxTransitions;
 extern llvm::cl::opt<bool> enableBufidSync;
 extern llvm::cl::opt<bool> enableBufidSyncDebug;
 extern llvm::cl::opt<bool> enableInjectBarrierAllSync;

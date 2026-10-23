@@ -13,6 +13,8 @@
 // physical VReg for group=4.  The source IR intentionally leaves layouts open:
 // support is defined by element type and logical length, while layout selection
 // remains an implementation detail of the compiler.
+// The i8/bf16 shapes also have compact contiguous rows. The f32 shape is not
+// compact, so its partial result still requires the lane-strided layout.
 
 module {
   func.func @group4_broadcast_i8_128(%scalar: i8)
@@ -44,13 +46,13 @@ module {
 // ASSIGN: pto.vmi.broadcast
 // ASSIGN-SAME: -> !pto.vmi.vreg<4xi8, #pto.vmi.layout<num_groups = 4, slots = 8>>
 // ASSIGN: pto.vmi.group_broadcast
-// ASSIGN-SAME: -> !pto.vmi.vreg<128xi8, #pto.vmi.layout<contiguous, lane_stride = 2>>
+// ASSIGN-SAME: -> !pto.vmi.vreg<128xi8, #pto.vmi.layout<contiguous>>
 
 // ASSIGN-LABEL: func.func @group4_broadcast_bf16_64(
 // ASSIGN: pto.vmi.broadcast
 // ASSIGN-SAME: -> !pto.vmi.vreg<4xbf16, #pto.vmi.layout<num_groups = 4, slots = 8>>
 // ASSIGN: pto.vmi.group_broadcast
-// ASSIGN-SAME: -> !pto.vmi.vreg<64xbf16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+// ASSIGN-SAME: -> !pto.vmi.vreg<64xbf16, #pto.vmi.layout<contiguous>>
 
 // ASSIGN-LABEL: func.func @group4_broadcast_f32_32(
 // ASSIGN: pto.vmi.broadcast

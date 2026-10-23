@@ -1219,12 +1219,69 @@ VMILayoutAttr VMILayoutPropagator::getRequestedLayout(Value value) const {
   return it->second.layout;
 }
 
-VMILayoutAttr
-VMILayoutPropagator::getRequestedOrCurrentLayout(Value value) const {
-  if (VMILayoutAttr layout = getRequestedLayout(value)) {
-    return layout;
-  }
-  return getCurrentLayout(value);
+VMILayoutAttr VMILayoutPropagator::getRequestedLayout(OpOperand& operand) const
+{
+    const VMIValueLayoutAssignment* assignment = lookup(operand.get());
+    if (!assignment) {
+        return {};
+    }
+    for (const VMILayoutConflict& conflict : assignment->conflicts) {
+        if (conflict.operand == &operand) {
+            return conflict.layout;
+        }
+    }
+    return assignment->layout;
+}
+
+LogicalResult VMILayoutPropagator::installPlanned(Value value, VMILayoutAttr layout)
+{
+    if (!layout || !isLayoutValue(value)) {
+        return failure();
+    }
+    auto [it, inserted] = assignments.try_emplace(value);
+    if (inserted) {
+        orderedValues.push_back(value);
+    }
+    VMIValueLayoutAssignment& assignment = it->second;
+    if (assignment.layout && assignment.layout != layout) {
+        return failure();
+    }
+    assignment.layout = layout;
+    return success();
+}
+
+LogicalResult VMILayoutPropagator::installPlanned(OpOperand& operand, VMILayoutAttr layout)
+{
+    if (!layout || !isLayoutValue(operand.get())) {
+        return failure();
+    }
+    auto [it, inserted] = assignments.try_emplace(operand.get());
+    if (inserted) {
+        orderedValues.push_back(operand.get());
+    }
+    VMIValueLayoutAssignment& assignment = it->second;
+    if (!assignment.layout) {
+        VMILayoutAttr current = getCurrentLayout(operand.get());
+        // Structural transport values (for example SCF region results) may be
+        // intentionally untyped before the solver commits its canonical layout.
+        // The validated use relation is the only available primary seed in that
+        // case; ordinary producer values still keep their explicit type layout.
+        assignment.layout = current ? current : layout;
+    }
+    if (assignment.layout == layout) {
+        return success();
+    }
+    return addUseConflict(operand, assignment, layout);
+}
+
+void VMILayoutPropagator::endExactRequests() {}
+
+VMILayoutAttr VMILayoutPropagator::getRequestedOrCurrentLayout(Value value) const
+{
+    if (VMILayoutAttr layout = getRequestedLayout(value)) {
+        return layout;
+    }
+    return getCurrentLayout(value);
 }
 
 VMILayoutAttr VMILayoutPropagator::getOperandLayout(OpOperand &operand) const {

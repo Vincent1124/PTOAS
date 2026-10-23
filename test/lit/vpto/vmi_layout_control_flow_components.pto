@@ -1,0 +1,281 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt %s -vmi-layout-assignment | FileCheck %s --check-prefix=ASSIGN --implicit-check-not=pto.vmi.ensure_layout
+// RUN: pto-test-opt %s -vmi-layout-assignment -vmi-to-vpto | FileCheck %s --check-prefix=LOWER --implicit-check-not=pto.vintlv --implicit-check-not=pto.vdintlv --implicit-check-not=pto.vmi.
+
+// Independent producers must share the control-flow component with their
+// consumers, regardless of definition order, block order or region nesting.
+// All broadcasts can directly produce the store's D2 layout. No conversion
+// may be inserted after solving to repair a disconnected control-flow edge.
+
+// ASSIGN-LABEL: func.func @control_flow_cfg_join(
+// ASSIGN: pto.vmi.broadcast{{.*}} -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// ASSIGN: pto.vmi.store{{.*}} : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// LOWER-LABEL: func.func @control_flow_cfg_join(
+// LOWER: pto.vdup
+// LOWER: pto.vstsx2{{.*}} "INTLV_B32"
+module {
+  func.func @control_flow_cfg_join(%arg0: i1, %arg1: index, %arg2: f32, %arg3: f32, %arg4: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    cf.cond_br %arg0, ^bb1, ^bb2
+  ^bb1:  // pred: ^bb0
+    %0 = pto.vmi.broadcast %arg2 : f32 -> !pto.vmi.vreg<128xf32>
+    cf.br ^bb3(%0 : !pto.vmi.vreg<128xf32>)
+  ^bb2:  // pred: ^bb0
+    %1 = pto.vmi.broadcast %arg3 : f32 -> !pto.vmi.vreg<128xf32>
+    cf.br ^bb3(%1 : !pto.vmi.vreg<128xf32>)
+  ^bb3(%2: !pto.vmi.vreg<128xf32>):  // 2 preds: ^bb1, ^bb2
+    pto.vmi.store %2, %arg4[%c0] : !pto.vmi.vreg<128xf32>, !pto.ptr<f32, ub>
+    return
+  }
+}
+
+
+// ASSIGN-LABEL: func.func @control_flow_cfg_join_reversed(
+// ASSIGN: pto.vmi.broadcast{{.*}} -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// ASSIGN: pto.vmi.store{{.*}} : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// LOWER-LABEL: func.func @control_flow_cfg_join_reversed(
+// LOWER: pto.vdup
+// LOWER: pto.vstsx2{{.*}} "INTLV_B32"
+module {
+  func.func @control_flow_cfg_join_reversed(%arg0: i1, %arg1: index, %arg2: f32, %arg3: f32, %arg4: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    cf.cond_br %arg0, ^bb2, ^bb1
+  ^bb1:  // pred: ^bb0
+    %0 = pto.vmi.broadcast %arg3 : f32 -> !pto.vmi.vreg<128xf32>
+    cf.br ^bb3(%0 : !pto.vmi.vreg<128xf32>)
+  ^bb2:  // pred: ^bb0
+    %1 = pto.vmi.broadcast %arg2 : f32 -> !pto.vmi.vreg<128xf32>
+    cf.br ^bb3(%1 : !pto.vmi.vreg<128xf32>)
+  ^bb3(%2: !pto.vmi.vreg<128xf32>):  // 2 preds: ^bb1, ^bb2
+    pto.vmi.store %2, %arg4[%c0] : !pto.vmi.vreg<128xf32>, !pto.ptr<f32, ub>
+    return
+  }
+}
+
+
+// ASSIGN-LABEL: func.func @control_flow_execute(
+// ASSIGN: pto.vmi.broadcast{{.*}} -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// ASSIGN: pto.vmi.store{{.*}} : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// LOWER-LABEL: func.func @control_flow_execute(
+// LOWER: pto.vdup
+// LOWER: pto.vstsx2{{.*}} "INTLV_B32"
+module {
+  func.func @control_flow_execute(%arg0: i1, %arg1: index, %arg2: f32, %arg3: f32, %arg4: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %0 = pto.vmi.broadcast %arg2 : f32 -> !pto.vmi.vreg<128xf32>
+    %1 = scf.execute_region -> !pto.vmi.vreg<128xf32> {
+      scf.yield %0 : !pto.vmi.vreg<128xf32>
+    }
+    pto.vmi.store %1, %arg4[%c0] : !pto.vmi.vreg<128xf32>, !pto.ptr<f32, ub>
+    return
+  }
+}
+
+
+// ASSIGN-LABEL: func.func @control_flow_for_init_first(
+// ASSIGN: pto.vmi.broadcast{{.*}} -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// ASSIGN: pto.vmi.store{{.*}} : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// LOWER-LABEL: func.func @control_flow_for_init_first(
+// LOWER: pto.vdup
+// LOWER: pto.vstsx2{{.*}} "INTLV_B32"
+module {
+  func.func @control_flow_for_init_first(%arg0: i1, %arg1: index, %arg2: f32, %arg3: f32, %arg4: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %0 = pto.vmi.broadcast %arg2 : f32 -> !pto.vmi.vreg<128xf32>
+    %1 = pto.vmi.broadcast %arg3 : f32 -> !pto.vmi.vreg<128xf32>
+    %2 = scf.for %arg5 = %c0 to %c2 step %c1 iter_args(%arg6 = %0) -> (!pto.vmi.vreg<128xf32>) {
+      scf.yield %1 : !pto.vmi.vreg<128xf32>
+    }
+    pto.vmi.store %2, %arg4[%c0] : !pto.vmi.vreg<128xf32>, !pto.ptr<f32, ub>
+    return
+  }
+}
+
+
+// ASSIGN-LABEL: func.func @control_flow_for_yield_first(
+// ASSIGN: pto.vmi.broadcast{{.*}} -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// ASSIGN: pto.vmi.store{{.*}} : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// LOWER-LABEL: func.func @control_flow_for_yield_first(
+// LOWER: pto.vdup
+// LOWER: pto.vstsx2{{.*}} "INTLV_B32"
+module {
+  func.func @control_flow_for_yield_first(%arg0: i1, %arg1: index, %arg2: f32, %arg3: f32, %arg4: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %0 = pto.vmi.broadcast %arg3 : f32 -> !pto.vmi.vreg<128xf32>
+    %1 = pto.vmi.broadcast %arg2 : f32 -> !pto.vmi.vreg<128xf32>
+    %2 = scf.for %arg5 = %c0 to %c2 step %c1 iter_args(%arg6 = %1) -> (!pto.vmi.vreg<128xf32>) {
+      scf.yield %0 : !pto.vmi.vreg<128xf32>
+    }
+    pto.vmi.store %2, %arg4[%c0] : !pto.vmi.vreg<128xf32>, !pto.ptr<f32, ub>
+    return
+  }
+}
+
+
+// ASSIGN-LABEL: func.func @control_flow_if(
+// ASSIGN: pto.vmi.broadcast{{.*}} -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// ASSIGN: pto.vmi.store{{.*}} : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// LOWER-LABEL: func.func @control_flow_if(
+// LOWER: pto.vdup
+// LOWER: pto.vstsx2{{.*}} "INTLV_B32"
+module {
+  func.func @control_flow_if(%arg0: i1, %arg1: index, %arg2: f32, %arg3: f32, %arg4: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %0 = pto.vmi.broadcast %arg2 : f32 -> !pto.vmi.vreg<128xf32>
+    %1 = pto.vmi.broadcast %arg3 : f32 -> !pto.vmi.vreg<128xf32>
+    %2 = scf.if %arg0 -> (!pto.vmi.vreg<128xf32>) {
+      scf.yield %0 : !pto.vmi.vreg<128xf32>
+    } else {
+      scf.yield %1 : !pto.vmi.vreg<128xf32>
+    }
+    pto.vmi.store %2, %arg4[%c0] : !pto.vmi.vreg<128xf32>, !pto.ptr<f32, ub>
+    return
+  }
+}
+
+
+// ASSIGN-LABEL: func.func @control_flow_if_inside(
+// ASSIGN: pto.vmi.broadcast{{.*}} -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// ASSIGN: pto.vmi.store{{.*}} : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// LOWER-LABEL: func.func @control_flow_if_inside(
+// LOWER: pto.vdup
+// LOWER: pto.vstsx2{{.*}} "INTLV_B32"
+module {
+  func.func @control_flow_if_inside(%arg0: i1, %arg1: index, %arg2: f32, %arg3: f32, %arg4: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %0 = scf.if %arg0 -> (!pto.vmi.vreg<128xf32>) {
+      %1 = pto.vmi.broadcast %arg2 : f32 -> !pto.vmi.vreg<128xf32>
+      scf.yield %1 : !pto.vmi.vreg<128xf32>
+    } else {
+      %1 = pto.vmi.broadcast %arg3 : f32 -> !pto.vmi.vreg<128xf32>
+      scf.yield %1 : !pto.vmi.vreg<128xf32>
+    }
+    pto.vmi.store %0, %arg4[%c0] : !pto.vmi.vreg<128xf32>, !pto.ptr<f32, ub>
+    return
+  }
+}
+
+
+// ASSIGN-LABEL: func.func @control_flow_if_nested(
+// ASSIGN: pto.vmi.broadcast{{.*}} -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// ASSIGN: pto.vmi.store{{.*}} : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// LOWER-LABEL: func.func @control_flow_if_nested(
+// LOWER: pto.vdup
+// LOWER: pto.vstsx2{{.*}} "INTLV_B32"
+module {
+  func.func @control_flow_if_nested(%arg0: i1, %arg1: index, %arg2: f32, %arg3: f32, %arg4: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %0 = pto.vmi.broadcast %arg2 : f32 -> !pto.vmi.vreg<128xf32>
+    %1 = pto.vmi.broadcast %arg3 : f32 -> !pto.vmi.vreg<128xf32>
+    %2 = scf.if %arg0 -> (!pto.vmi.vreg<128xf32>) {
+      %3 = scf.if %arg0 -> (!pto.vmi.vreg<128xf32>) {
+        scf.yield %0 : !pto.vmi.vreg<128xf32>
+      } else {
+        scf.yield %1 : !pto.vmi.vreg<128xf32>
+      }
+      scf.yield %3 : !pto.vmi.vreg<128xf32>
+    } else {
+      scf.yield %1 : !pto.vmi.vreg<128xf32>
+    }
+    pto.vmi.store %2, %arg4[%c0] : !pto.vmi.vreg<128xf32>, !pto.ptr<f32, ub>
+    return
+  }
+}
+
+
+// ASSIGN-LABEL: func.func @control_flow_if_reversed(
+// ASSIGN: pto.vmi.broadcast{{.*}} -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// ASSIGN: pto.vmi.store{{.*}} : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// LOWER-LABEL: func.func @control_flow_if_reversed(
+// LOWER: pto.vdup
+// LOWER: pto.vstsx2{{.*}} "INTLV_B32"
+module {
+  func.func @control_flow_if_reversed(%arg0: i1, %arg1: index, %arg2: f32, %arg3: f32, %arg4: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %0 = pto.vmi.broadcast %arg3 : f32 -> !pto.vmi.vreg<128xf32>
+    %1 = pto.vmi.broadcast %arg2 : f32 -> !pto.vmi.vreg<128xf32>
+    %2 = scf.if %arg0 -> (!pto.vmi.vreg<128xf32>) {
+      scf.yield %1 : !pto.vmi.vreg<128xf32>
+    } else {
+      scf.yield %0 : !pto.vmi.vreg<128xf32>
+    }
+    pto.vmi.store %2, %arg4[%c0] : !pto.vmi.vreg<128xf32>, !pto.ptr<f32, ub>
+    return
+  }
+}
+
+
+// ASSIGN-LABEL: func.func @control_flow_index_switch(
+// ASSIGN: pto.vmi.broadcast{{.*}} -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// ASSIGN: pto.vmi.store{{.*}} : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// LOWER-LABEL: func.func @control_flow_index_switch(
+// LOWER: pto.vdup
+// LOWER: pto.vstsx2{{.*}} "INTLV_B32"
+module {
+  func.func @control_flow_index_switch(%arg0: i1, %arg1: index, %arg2: f32, %arg3: f32, %arg4: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %0 = pto.vmi.broadcast %arg2 : f32 -> !pto.vmi.vreg<128xf32>
+    %1 = pto.vmi.broadcast %arg3 : f32 -> !pto.vmi.vreg<128xf32>
+    %2 = scf.index_switch %arg1 -> !pto.vmi.vreg<128xf32>
+    case 0 {
+      scf.yield %0 : !pto.vmi.vreg<128xf32>
+    }
+    default {
+      scf.yield %1 : !pto.vmi.vreg<128xf32>
+    }
+    pto.vmi.store %2, %arg4[%c0] : !pto.vmi.vreg<128xf32>, !pto.ptr<f32, ub>
+    return
+  }
+}
+
+
+// ASSIGN-LABEL: func.func @control_flow_while(
+// ASSIGN: pto.vmi.broadcast{{.*}} -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// ASSIGN: pto.vmi.store{{.*}} : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// LOWER-LABEL: func.func @control_flow_while(
+// LOWER: pto.vdup
+// LOWER: pto.vstsx2{{.*}} "INTLV_B32"
+module {
+  func.func @control_flow_while(%arg0: i1, %arg1: index, %arg2: f32, %arg3: f32, %arg4: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %0 = pto.vmi.broadcast %arg3 : f32 -> !pto.vmi.vreg<128xf32>
+    %1 = pto.vmi.broadcast %arg2 : f32 -> !pto.vmi.vreg<128xf32>
+    %2 = scf.while (%arg5 = %1) : (!pto.vmi.vreg<128xf32>) -> !pto.vmi.vreg<128xf32> {
+      scf.condition(%arg0) %arg5 : !pto.vmi.vreg<128xf32>
+    } do {
+    ^bb0(%arg5: !pto.vmi.vreg<128xf32>):
+      scf.yield %0 : !pto.vmi.vreg<128xf32>
+    }
+    pto.vmi.store %2, %arg4[%c0] : !pto.vmi.vreg<128xf32>, !pto.ptr<f32, ub>
+    return
+  }
+}

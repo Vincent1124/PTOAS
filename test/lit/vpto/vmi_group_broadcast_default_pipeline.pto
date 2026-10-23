@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o - | FileCheck %s --check-prefix=DEFAULT --implicit-check-not=E2B_B32 --implicit-check-not=pto.vintlv --implicit-check-not=pto.vmi.
+// RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-pre-assignment-combine -vmi-mask-granularity-assignment -vmi-layout-assignment -vmi-expand-implicit-ensure-layouts -vmi-to-vpto | FileCheck %s --check-prefix=EXPLICIT --implicit-check-not=BRC_B32 --implicit-check-not=pto.vmi.
+
+// The default pipeline preserves the solver's contiguous/BRC decision.
+// The compatibility expansion remains available when explicitly requested.
+module {
+  func.func @broadcast_four_groups(%src: !pto.ptr<f32, ub>, %dst: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %slots = pto.vmi.vload %src[%c0], %c1 {group = 4}
+        : !pto.ptr<f32, ub> -> !pto.vmi.vreg<4xf32>
+    %out = pto.vmi.vbrc %slots {group = 4}
+        : !pto.vmi.vreg<4xf32> -> !pto.vmi.vreg<128xf32>
+    pto.vmi.vstore %out, %dst[%c0]
+        : !pto.vmi.vreg<128xf32>, !pto.ptr<f32, ub>
+    return
+  }
+}
+
+// DEFAULT-LABEL: func.func @broadcast_four_groups(
+// DEFAULT-COUNT-4: pto.vlds {{.*}} {dist = "BRC_B32"}
+// DEFAULT: pto.vsel
+// DEFAULT: pto.vsts
+// DEFAULT: return
+
+// EXPLICIT-LABEL: func.func @broadcast_four_groups(
+// EXPLICIT: pto.vlds {{.*}} {dist = "E2B_B32"}
+// EXPLICIT: pto.vintlv
+// EXPLICIT: pto.vsts
+// EXPLICIT: return

@@ -514,12 +514,13 @@ struct OneToNVMIEnsureMaskLayoutOpPattern
     auto resultType = cast<VMIMaskType>(op.getResult().getType());
     VMILayoutSupport supports;
     std::string supportReason;
-    if (failed(supports.getEnsureMaskLayoutFact(sourceType, resultType,
-                                                &supportReason))) {
-      return rewriter.notifyMatchFailure(
-          op, Twine("ensure_mask_layout has no registered materialization "
-                    "support: ") +
-                  supportReason);
+    FailureOr<VMIEnsureMaskLayoutFact> ensureFact =
+        supports.getEnsureMaskLayoutFact(sourceType, resultType, &supportReason);
+    if (failed(ensureFact)) {
+        return rewriter.notifyMatchFailure(
+            op, Twine("ensure_mask_layout has no registered materialization "
+                      "support: ") +
+                    supportReason);
     }
     bool granularityMismatch =
         sourceType.getGranularity() != resultType.getGranularity();
@@ -536,6 +537,15 @@ struct OneToNVMIEnsureMaskLayoutOpPattern
       return failure();
     }
     SmallVector<Type> resultTypes = std::move(*maybe_resultTypes);
+    // The support fact already reports when the predicate register is forwarded
+    // unchanged, which is what the cost model charges for it.
+    if (ensureFact->forwardsPhysicalParts) {
+        if (failed(verifyIdentityPartForwarding(op, sourceParts, resultTypes, rewriter))) {
+            return failure();
+        }
+        SmallVector<Value> forwarded(sourceParts.begin(), sourceParts.end());
+        return replacePhysicalResults(rewriter, op, forwarded, *this->getTypeConverter());
+    }
     FailureOr<SmallVector<Value>> results = materializeMaskLayoutConversion(
         op, sourceParts, resultTypes, sourceLayout, resultLayout, rewriter);
     if (failed(results)) {
@@ -1903,62 +1913,6 @@ private:
                                      *this->getTypeConverter());
     return success();
   }
-  FailureOr<SmallVector<Value>> buildFactor4ContiguousParts(
-      VMICreateGroupMaskOp op, OpAdaptor adaptor,
-      OneToNPatternRewriter &rewriter, VMIMaskType contiguousType,
-      ArrayRef<Type> resultTypes) const {
-    auto activeConstant =
-        op.getActiveElemsPerGroup().getDefiningOp<arith::ConstantOp>();
-    if (!activeConstant) {
-      FailureOr<Value> active = getSingleValue(
-          op, adaptor.getActiveElemsPerGroup(),
-          "create_group_mask active_elems_per_group must convert to one value",
-          rewriter);
-      if (failed(active)) {
-        return failure();
-      }
-      return materializeDynamicGroupMaskForType(
-          op, *active, contiguousType, resultTypes, rewriter);
-    }
-    std::string contiguousReason;
-    FailureOr<SmallVector<ConstantMaskChunkMaterialization>> materializations =
-        computeGroupMaskMaterializationForType(op, contiguousType,
-                                               &contiguousReason);
-    if (failed(materializations)) {
-      return rewriter.notifyMatchFailure(
-          op, Twine("create_group_mask ") + contiguousReason);
-    }
-    return materializeGroupMaskResults(
-        op, *materializations, resultTypes,
-        "create_group_mask produced too many contiguous masks", rewriter);
-  }
-  LogicalResult lowerFactor4Block(
-      VMICreateGroupMaskOp op, OpAdaptor adaptor,
-      OneToNPatternRewriter &rewriter, VMIMaskType resultVMIType,
-      VMILayoutAttr resultLayout, ArrayRef<Type> resultTypes) const {
-    VMILayoutAttr contiguousLayout =
-        VMILayoutAttr::getContiguous(op.getContext());
-    auto contiguousType =
-        VMIMaskType::get(op.getContext(), resultVMIType.getElementCount(),
-                         resultVMIType.getGranularity(), contiguousLayout);
-    FailureOr<SmallVector<Value>> contiguousParts =
-        buildFactor4ContiguousParts(op, adaptor, rewriter, contiguousType,
-                                    resultTypes);
-    if (failed(contiguousParts)) {
-      return failure();
-    }
-    bool resultCountMismatch = contiguousParts->size() != resultTypes.size();
-    if (resultCountMismatch) {
-      return rewriter.notifyMatchFailure(
-          op, "create_group_mask contiguous physical result count mismatch");
-    }
-    return replaceMaterializedResults(
-        rewriter, op,
-        materializeMaskLayoutConversion(op, *contiguousParts, resultTypes,
-                                        contiguousLayout, resultLayout,
-                                        rewriter),
-        *this->getTypeConverter());
-  }
 public:
   LogicalResult
   matchAndRewrite(VMICreateGroupMaskOp op, OpAdaptor adaptor,
@@ -1972,13 +1926,6 @@ public:
     SmallVector<Type> resultTypes = std::move(*maybe_resultTypes);
     auto resultVMIType = cast<VMIMaskType>(op.getResult().getType());
     VMILayoutAttr resultLayout = resultVMIType.getLayoutAttr();
-    bool needsFactor4ContiguousMaterialization =
-        resultLayout && resultLayout.isBlockDeinterleaved() &&
-        resultLayout.getFactor() == kDeintFactor4;
-    if (needsFactor4ContiguousMaterialization) {
-      return lowerFactor4Block(op, adaptor, rewriter, resultVMIType,
-                               resultLayout, resultTypes);
-    }
     auto activeConstant =
         op.getActiveElemsPerGroup().getDefiningOp<arith::ConstantOp>();
     if (!activeConstant) {

@@ -90,6 +90,23 @@ private:
       VMIVRegType resultVMIType, ArrayRef<Type> resultTypes) const {
     const int64_t blockCount =
         pto::getVMIContiguousLoadBlockCount(resultVMIType);
+    // A multi-block 16/32-bit payload whose effective address is provably
+    // 32-byte aligned may over-read the full physical carrier with a dense
+    // load. The bounded block read requires that same alignment, so it adds
+    // the block mask and the block-stride base update only to avoid the
+    // over-read that the load safety policy already accepts (every mode except
+    // Error). Keep the exact bounded read for single-block payloads, scalar
+    // broadcasts, unaligned sources, 8-bit sources (their histogram/scatter
+    // consumers have an exact-footprint contract), and load-safety=error.
+    const bool denseOverReadAccepted =
+        blockCount > 1 && loadSafety != VMILoadSafetyPolicy::Error &&
+        pto::getPTOStorageElemBitWidth(resultVMIType.getElementType()) >= 16 &&
+        isKnownAddressAligned(op.getSource(), op.getOffset(),
+                              resultVMIType.getElementType(),
+                              kMemoryAccessAlignmentBytes);
+    if (denseOverReadAccepted) {
+      return std::nullopt;
+    }
     // Scalar BRC needs only element alignment. Every VSLDB block, including
     // a single masked block, requires an aligned effective address.
     const bool boundedRead =
@@ -161,8 +178,15 @@ private:
       return failure();
     }
     auto resultVMIType = cast<VMIVRegType>(op.getResult().getType());
+    // The fallback reads contiguous carriers and then rearranges registers.
+    // Prove the footprint actually read, rather than the padded result layout.
+    auto contiguousVMIType = VMIVRegType::get(
+        resultVMIType.getContext(), resultVMIType.getElementCount(),
+        resultVMIType.getElementType(),
+        VMILayoutAttr::getContiguous(rewriter.getContext()));
     FailureOr<int64_t> lanesPerPart = verifyFullOrSafeReadVRegChunks(
-        op, resultVMIType, op.getSource(), op.getOffset(), rewriter, loadSafety);
+        op, contiguousVMIType, op.getSource(), op.getOffset(), rewriter,
+        loadSafety);
     if (failed(lanesPerPart)) {
       return failure();
     }
@@ -1196,26 +1220,38 @@ static LogicalResult emitGroupSlotLoadSlots8Chunk(
 }
 
 static LogicalResult lowerGroupSlotLoadSlots8(
-    Operation *op, Value source, Value offset, Value sourceGroupStride,
-    VMIVRegType resultVMIType, TypeRange resultTypes, int64_t numGroups,
-    OneToNPatternRewriter &rewriter, SmallVectorImpl<Value> &results) {
-  std::optional<int64_t> stride = getConstantIndexValue(sourceGroupStride);
-  if (!stride || *stride != 1) {
-    return rewriter.notifyMatchFailure(
-        op, "slots=8 group_slot_load requires constant unit stride");
-  }
-  if (numGroups == 1) {
-    return lowerSingleGroupSlotLoad(op, source, offset, resultVMIType,
-                                    resultTypes, rewriter, results);
-  }
-  for (auto [chunk, resultType] : llvm::enumerate(resultTypes)) {
-    if (failed(emitGroupSlotLoadSlots8Chunk(
-            op, source, offset, resultType,
-            static_cast<int64_t>(chunk), numGroups, rewriter, results))) {
-      return failure();
+    Operation* op, Value source, Value offset, Value sourceGroupStride, VMIVRegType resultVMIType,
+    TypeRange resultTypes, int64_t numGroups, OneToNPatternRewriter& rewriter, SmallVectorImpl<Value>& results)
+{
+    std::optional<int64_t> stride = getConstantIndexValue(sourceGroupStride);
+    if (!stride || *stride != 1) {
+        return rewriter.notifyMatchFailure(op, "slots=8 group_slot_load requires constant unit stride");
     }
-  }
-  return success();
+    if (numGroups == 1) {
+        return lowerSingleGroupSlotLoad(op, source, offset, resultVMIType, resultTypes, rewriter, results);
+    }
+    SmallVector<Value> loadedParts;
+    for (auto [chunk, resultType] : llvm::enumerate(resultTypes)) {
+        if (failed(emitGroupSlotLoadSlots8Chunk(
+            op, source, offset, resultType, static_cast<int64_t>(chunk), numGroups, rewriter, loadedParts))) {
+            return failure();
+        }
+    }
+    // Memory holds adjacent group elements; widening carriers must space those
+    // elements in registers before an integer extension selects its low lanes.
+    int64_t laneStride = resultVMIType.getLayoutAttr().getLaneStride();
+    if (laneStride == 1) {
+        results.append(loadedParts.begin(), loadedParts.end());
+        return success();
+    }
+    // The loaded source elements are packed with unit lane stride.
+    FailureOr<SmallVector<Value>> stridedParts = materializeGroupSlotLaneStride(
+        op, loadedParts, resultTypes, resultVMIType.getElementType(), 1, laneStride, rewriter);
+    if (failed(stridedParts)) {
+        return failure();
+    }
+    results.append(stridedParts->begin(), stridedParts->end());
+    return success();
 }
 
 static LogicalResult emitGroupSlotLoadSlots1Chunk(

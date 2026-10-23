@@ -707,8 +707,14 @@ private:
     if (alreadyCompact) {
       return compactValue;
     }
-    VMILayoutAttr compactLayout = VMILayoutAttr::getGroupSlots(
-        rewriter.getContext(), layout.getNumGroups(), layout.getSlots());
+    auto groupStoreFact =
+        VMILayoutSupport().getGroupStoreLayoutFact(op, valueVMIType);
+    VMILayoutAttr compactLayout =
+        succeeded(groupStoreFact) && groupStoreFact->stagingLayout
+            ? groupStoreFact->stagingLayout
+            : VMILayoutAttr::getGroupSlots(rewriter.getContext(),
+                                           layout.getNumGroups(),
+                                           layout.getSlots());
     auto compactVMIType = VMIVRegType::get(
         rewriter.getContext(), valueVMIType.getElementCount(),
         valueVMIType.getElementType(), compactLayout);
@@ -1073,8 +1079,12 @@ private:
     if (scalar) {
       return GroupStoreLayoutKind::Scalar;
     }
-    bool compact = isCompactSmallGroupStore(
-        layout, valueVMIType, numGroups, getConstantIndexValue(op.getRowStride()));
+    auto groupStoreFact =
+        VMILayoutSupport().getGroupStoreLayoutFact(op, valueVMIType);
+    bool compact =
+        isCompactSmallGroupStore(layout, valueVMIType, numGroups,
+                                 getConstantIndexValue(op.getRowStride())) ||
+        (succeeded(groupStoreFact) && groupStoreFact->stagingLayout);
     if (compact) {
       return GroupStoreLayoutKind::Compact;
     }

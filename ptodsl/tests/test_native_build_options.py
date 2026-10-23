@@ -390,5 +390,71 @@ class LinkLineTest(unittest.TestCase):
         return run.call_args[0][0]
 
 
+@unittest.skipUnless(_HAS_PTOAS_MLIR, "PTOAS MLIR bindings required")
+class PtoasFlagsTest(unittest.TestCase):
+    def test_flags_are_scoped_immutable_and_part_of_cache_identity(self):
+        from ptodsl import pto
+
+        flags = ["--vmi-layout-max-frontier-entries=1024"]
+        configured = pto.jit(ptoas_flags=flags)(lambda: None)
+        default = pto.jit()(lambda: None)
+        flags.clear()
+        configured_flags = configured.__ptodsl_cache_signature__()[-1]
+        default_flags = default.__ptodsl_cache_signature__()[-1]
+        self.assertEqual(configured_flags, ("--vmi-layout-max-frontier-entries=1024",))
+        self.assertEqual(default_flags, ())
+        configurations = []
+        for scoped_flags in (configured_flags, default_flags):
+            spec = _module_spec()
+            spec.ptoas_flags = scoped_flags
+            configurations.append(native_build.compile_config_text(
+                module_spec=spec, effective_insert_sync=False,
+                effective_pto_level="level3", ptoas_overrides={},
+            ))
+        self.assertNotEqual(*configurations)
+
+    def test_options_reach_ptoas_for_traced_and_source_kernels(self):
+        flags = ("--vmi-layout-max-frontier-entries=1024",)
+        for source in (None, "kernel.pto"):
+            with self.subTest(source=source):
+                spec = _module_spec()
+                spec.jit_source = source
+                spec.ptoas_flags = flags
+                commands = self.capture_native_build_commands(spec)
+                ptoas_commands = [command for command in commands if command[0] == "ptoas"]
+                self.assertEqual(len(ptoas_commands), 1)
+                self.assertIn(flags[0], ptoas_commands[0])
+
+    def capture_native_build_commands(self, spec):
+        commands = []
+
+        def run(command, **kwargs):
+            commands.append(command)
+            if command[0] == "ptoas":
+                Path(command[command.index("-o") + 1]).write_bytes(b"\x7fELF")
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(native_build, "cache_enabled", return_value=False), \
+                mock.patch.object(native_build, "generate_launch_cpp", return_value="// launch"), \
+                mock.patch.object(native_build, "resolve_ptoas_binary", return_value="ptoas"), \
+                mock.patch.object(native_build, "resolve_bisheng", return_value="bisheng"), \
+                mock.patch.object(native_build, "common_include_flags", return_value=[]), \
+                mock.patch.object(native_build, "runtime_library_flags", return_value=[]), \
+                mock.patch.object(native_build.ctypes, "CDLL"), \
+                mock.patch.object(native_build, "_run", side_effect=run):
+            native_build.build_native_library(
+                py_name="k", module_spec=spec, kernel_signature=None,
+                mlir_text="module {}", specialization_key="flags-test",
+            )
+        return commands
+
+    def test_malformed_flags_are_rejected(self):
+        from ptodsl import pto
+
+        for flags in ("--help", [1], ["kernel.pto"], ["--bad\x00"]):
+            with self.subTest(flags=flags), self.assertRaises(TypeError):
+                pto.jit(ptoas_flags=flags)
+
+
 if __name__ == "__main__":
     unittest.main()

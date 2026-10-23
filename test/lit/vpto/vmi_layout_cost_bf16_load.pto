@@ -1,0 +1,153 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-mask-granularity-assignment -vmi-layout-assignment | FileCheck %s --check-prefix=ASSIGN
+// RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-mask-granularity-assignment -vmi-layout-assignment -vmi-to-vpto | FileCheck %s --check-prefix=LOWER --implicit-check-not=pto.vmi.
+
+// A BF16 load can absorb lane_stride=2 and widen directly with vcvt. Charging
+// the internal vintlv of a same-layout cast makes this cheaper end to end.
+// Zero-weight and saturated scopes tie in the primary score and may retain
+// a separate unpack; check those boundary paths explicitly as well.
+// Empty, negative-bound, dynamic, and overflowing nested trip counts also
+// exercise zero and saturated scope weights without executing the loops.
+module {
+  func.func @bf16_zero(%src: !pto.ptr<bf16, ub>, %out: !pto.ptr<f32, ub>, %n: index) {
+    %c0 = arith.constant 0 : index
+    %lb = arith.constant 0 : index
+    %step = arith.constant 1 : index
+    %ub = arith.constant 0 : index
+    scf.for %i = %lb to %ub step %step {
+      %x = pto.vmi.vload %src[%c0] : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<64xbf16>
+      %y = pto.vmi.vcvt %x : !pto.vmi.vreg<64xbf16> -> !pto.vmi.vreg<64xf32>
+      pto.vmi.vstore %y, %out[%c0] : !pto.vmi.vreg<64xf32>, !pto.ptr<f32, ub>
+    }
+    return
+  }
+  func.func @bf16_one(%src: !pto.ptr<bf16, ub>, %out: !pto.ptr<f32, ub>, %n: index) {
+    %c0 = arith.constant 0 : index
+    %lb = arith.constant -1 : index
+    %step = arith.constant 1 : index
+    %ub = arith.constant 0 : index
+    scf.for %i = %lb to %ub step %step {
+      %x = pto.vmi.vload %src[%c0] : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<64xbf16>
+      %y = pto.vmi.vcvt %x : !pto.vmi.vreg<64xbf16> -> !pto.vmi.vreg<64xf32>
+      pto.vmi.vstore %y, %out[%c0] : !pto.vmi.vreg<64xf32>, !pto.ptr<f32, ub>
+    }
+    return
+  }
+  func.func @bf16_eight(%src: !pto.ptr<bf16, ub>, %out: !pto.ptr<f32, ub>, %n: index) {
+    %c0 = arith.constant 0 : index
+    %lb = arith.constant 0 : index
+    %step = arith.constant 2 : index
+    %ub = arith.constant 15 : index
+    scf.for %i = %lb to %ub step %step {
+      %x = pto.vmi.vload %src[%c0] : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<64xbf16>
+      %y = pto.vmi.vcvt %x : !pto.vmi.vreg<64xbf16> -> !pto.vmi.vreg<64xf32>
+      pto.vmi.vstore %y, %out[%c0] : !pto.vmi.vreg<64xf32>, !pto.ptr<f32, ub>
+    }
+    return
+  }
+  func.func @bf16_huge(%src: !pto.ptr<bf16, ub>, %out: !pto.ptr<f32, ub>, %n: index) {
+    %c0 = arith.constant 0 : index
+    %lb = arith.constant -9223372036854775808 : index
+    %step = arith.constant 1 : index
+    %ub = arith.constant 9223372036854775807 : index
+    scf.for %i = %lb to %ub step %step {
+      %x = pto.vmi.vload %src[%c0] : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<64xbf16>
+      %y = pto.vmi.vcvt %x : !pto.vmi.vreg<64xbf16> -> !pto.vmi.vreg<64xf32>
+      pto.vmi.vstore %y, %out[%c0] : !pto.vmi.vreg<64xf32>, !pto.ptr<f32, ub>
+    }
+    return
+  }  func.func @bf16_nested_huge(%src: !pto.ptr<bf16, ub>, %out: !pto.ptr<f32, ub>, %n: index) {
+    %c0 = arith.constant 0 : index
+    %lb = arith.constant -9223372036854775808 : index
+    %step = arith.constant 1 : index
+    %ub = arith.constant 9223372036854775807 : index
+    scf.for %outer = %lb to %ub step %step {
+    scf.for %i = %lb to %ub step %step {
+      %x = pto.vmi.vload %src[%c0] : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<64xbf16>
+      %y = pto.vmi.vcvt %x : !pto.vmi.vreg<64xbf16> -> !pto.vmi.vreg<64xf32>
+      pto.vmi.vstore %y, %out[%c0] : !pto.vmi.vreg<64xf32>, !pto.ptr<f32, ub>
+    }
+    }
+    return
+  }
+  func.func @bf16_dynamic(%src: !pto.ptr<bf16, ub>, %out: !pto.ptr<f32, ub>, %n: index) {
+    %c0 = arith.constant 0 : index
+    %lb = arith.constant 0 : index
+    %step = arith.constant 1 : index
+    scf.for %i = %lb to %n step %step {
+      %x = pto.vmi.vload %src[%c0] : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<64xbf16>
+      %y = pto.vmi.vcvt %x : !pto.vmi.vreg<64xbf16> -> !pto.vmi.vreg<64xf32>
+      pto.vmi.vstore %y, %out[%c0] : !pto.vmi.vreg<64xf32>, !pto.ptr<f32, ub>
+    }
+    return
+  }
+}
+// ASSIGN-LABEL: func.func @bf16_zero(
+// ASSIGN: pto.vmi.load
+// ASSIGN-SAME: -> !pto.vmi.vreg<64xbf16, #pto.vmi.layout<contiguous>>
+// ASSIGN: pto.vmi.ensure_layout
+// ASSIGN: pto.vmi.extf
+// LOWER-LABEL: func.func @bf16_zero(
+// LOWER: pto.vlds
+// LOWER: pto.vzunpack
+// LOWER: pto.vcvt {{.*}}part = "EVEN"
+// LOWER: pto.vsts
+// LOWER: return
+// ASSIGN-LABEL: func.func @bf16_one(
+// ASSIGN: pto.vmi.load
+// ASSIGN-SAME: -> !pto.vmi.vreg<64xbf16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+// ASSIGN: pto.vmi.extf
+// LOWER-LABEL: func.func @bf16_one(
+// LOWER: pto.vlds
+// LOWER: pto.vcvt
+// LOWER-NOT: pto.vintlv
+// LOWER: return
+// ASSIGN-LABEL: func.func @bf16_eight(
+// ASSIGN: pto.vmi.load
+// ASSIGN-SAME: -> !pto.vmi.vreg<64xbf16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+// ASSIGN: pto.vmi.extf
+// LOWER-LABEL: func.func @bf16_eight(
+// LOWER: pto.vlds
+// LOWER: pto.vcvt
+// LOWER-NOT: pto.vintlv
+// LOWER: return
+// ASSIGN-LABEL: func.func @bf16_huge(
+// ASSIGN: pto.vmi.load
+// ASSIGN-SAME: -> !pto.vmi.vreg<64xbf16, #pto.vmi.layout<contiguous>>
+// ASSIGN: pto.vmi.ensure_layout
+// ASSIGN-SAME: -> !pto.vmi.vreg<64xbf16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+// ASSIGN: pto.vmi.extf
+// LOWER-LABEL: func.func @bf16_huge(
+// LOWER: pto.vlds
+// LOWER: pto.vzunpack
+// LOWER: pto.vcvt
+// LOWER-NOT: pto.vintlv
+// LOWER: return
+// ASSIGN-LABEL: func.func @bf16_nested_huge(
+// ASSIGN: pto.vmi.load
+// ASSIGN-SAME: -> !pto.vmi.vreg<64xbf16, #pto.vmi.layout<contiguous>>
+// ASSIGN: pto.vmi.ensure_layout
+// ASSIGN-SAME: -> !pto.vmi.vreg<64xbf16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+// ASSIGN: pto.vmi.extf
+// LOWER-LABEL: func.func @bf16_nested_huge(
+// LOWER: pto.vlds
+// LOWER: pto.vzunpack
+// LOWER: pto.vcvt
+// LOWER-NOT: pto.vintlv
+// LOWER: return
+// ASSIGN-LABEL: func.func @bf16_dynamic(
+// ASSIGN: pto.vmi.load
+// ASSIGN-SAME: -> !pto.vmi.vreg<64xbf16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+// ASSIGN: pto.vmi.extf
+// LOWER-LABEL: func.func @bf16_dynamic(
+// LOWER: pto.vlds
+// LOWER: pto.vcvt
+// LOWER-NOT: pto.vintlv
+// LOWER: return

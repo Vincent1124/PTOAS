@@ -239,82 +239,371 @@ module {
 }
 
 // CHECK-LABEL: func.func @vmi_to_vpto_dequant_matrix_f16_to_f32(
-// CHECK-SAME: %[[DSRC:[^,]+]]: !pto.ptr<f16, ub>
-// CHECK-SAME: %[[SCALE:[^,]+]]: f32
-// CHECK-SAME: %[[DDST:[^,]+]]: !pto.ptr<f32, ub>
-// CHECK: scf.for
-// CHECK: scf.for
-// CHECK: pto.vlds
-// CHECK: pto.vcvt {{.*}} {part = "EVEN"} : !pto.vreg<128xf16>, !pto.mask<b16> -> !pto.vreg<64xf32>
-// CHECK: pto.vcvt {{.*}} {part = "ODD"} : !pto.vreg<128xf16>, !pto.mask<b16> -> !pto.vreg<64xf32>
-// CHECK: pto.vmul {{.*}} : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
-// CHECK: pto.vstsx2 {{.*}} "INTLV_B32"{{.*}} : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.ptr<f32, ub>, index, !pto.mask<b32>
-// CHECK: scf.if
-// CHECK: pto.plt_b32 {{.*}} : i32 -> !pto.mask<b32>, i32
-// CHECK: pto.vsts
-
+// CHECK-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: !pto.ptr<f16, ub>,
+// CHECK-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: f32,
+// CHECK-SAME: %[[VAL_2:[a-zA-Z0-9_.$-]+]]: !pto.ptr<f32, ub>,
+// CHECK-SAME: %[[VAL_3:[a-zA-Z0-9_.$-]+]]: index,
+// CHECK-SAME: %[[VAL_4:[a-zA-Z0-9_.$-]+]]: index,
+// CHECK-SAME: %[[VAL_5:[a-zA-Z0-9_.$-]+]]: index,
+// CHECK-SAME: %[[VAL_6:[a-zA-Z0-9_.$-]+]]: index,
+// CHECK-SAME: %[[VAL_7:[a-zA-Z0-9_.$-]+]]: index) {
+// CHECK-NEXT: %[[VAL_8:[a-zA-Z0-9_.$-]+]] = arith.constant 64 : index
+// CHECK-NEXT: %[[VAL_9:[a-zA-Z0-9_.$-]+]] = arith.constant 128 : i32
+// CHECK-NEXT: %[[VAL_10:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : i32
+// CHECK-NEXT: %[[VAL_11:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : index
+// CHECK-NEXT: %[[VAL_12:[a-zA-Z0-9_.$-]+]] = arith.constant 1 : index
+// CHECK-NEXT: %[[VAL_13:[a-zA-Z0-9_.$-]+]] = arith.constant 128 : index
+// CHECK-NEXT: %[[VAL_14:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_6]], %[[VAL_13]] : index
+// CHECK-NEXT: %[[VAL_15:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_7]], %[[VAL_13]] : index
+// CHECK-NEXT: %[[VAL_16:[a-zA-Z0-9_.$-]+]] = arith.cmpi ne, %[[VAL_5]], %[[VAL_11]] : index
+// CHECK-NEXT: scf.for %[[VAL_17:[a-zA-Z0-9_.$-]+]] = %[[VAL_11]] to %[[VAL_3]] step %[[VAL_12]] {
+// CHECK-NEXT: %[[VAL_18:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_17]], %[[VAL_14]] : index
+// CHECK-NEXT: %[[VAL_19:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_17]], %[[VAL_15]] : index
+// CHECK-NEXT: scf.for %[[VAL_20:[a-zA-Z0-9_.$-]+]] = %[[VAL_11]] to %[[VAL_4]] step %[[VAL_12]] {
+// CHECK-NEXT: %[[VAL_21:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_20]], %[[VAL_13]] : index
+// CHECK-NEXT: %[[VAL_22:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_18]], %[[VAL_21]] : index
+// CHECK-NEXT: %[[VAL_23:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_19]], %[[VAL_21]] : index
+// CHECK-NEXT: %[[VAL_24:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_22]]] : !pto.ptr<f16, ub> -> !pto.vreg<128xf16>
+// CHECK-NEXT: %[[VAL_25:[a-zA-Z0-9_.$-]+]] = pto.pset_b16 "PAT_ALL" : !pto.mask<b16>
+// CHECK-NEXT: %[[VAL_26:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_24]], %[[VAL_25]] {part = "EVEN"} : !pto.vreg<128xf16>, !pto.mask<b16> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_27:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_24]], %[[VAL_25]] {part = "ODD"} : !pto.vreg<128xf16>, !pto.mask<b16> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_28:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_29:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_28]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_30:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_31:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_30]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_32:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_33:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_26]], %[[VAL_29]], %[[VAL_32]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_34:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_35:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_27]], %[[VAL_31]], %[[VAL_34]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_36:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: pto.vstsx2 %[[VAL_33]], %[[VAL_35]], %[[VAL_2]]{{\[}}%[[VAL_23]]], "INTLV_B32", %[[VAL_36]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.ptr<f32, ub>, index, !pto.mask<b32>
+// CHECK-NEXT: }
+// CHECK-NEXT: scf.if %[[VAL_16]] {
+// CHECK-NEXT: %[[VAL_37:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_4]], %[[VAL_13]] : index
+// CHECK-NEXT: %[[VAL_38:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_18]], %[[VAL_37]] : index
+// CHECK-NEXT: %[[VAL_39:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_19]], %[[VAL_37]] : index
+// CHECK-NEXT: %[[VAL_40:[a-zA-Z0-9_.$-]+]] = arith.index_cast %[[VAL_5]] : index to i32
+// CHECK-NEXT: %[[VAL_41:[a-zA-Z0-9_.$-]+]] = arith.maxsi %[[VAL_40]], %[[VAL_10]] : i32
+// CHECK-NEXT: %[[VAL_42:[a-zA-Z0-9_.$-]+]] = arith.minui %[[VAL_41]], %[[VAL_9]] : i32
+// CHECK-NEXT: %[[VAL_43:[a-zA-Z0-9_.$-]+]], %[[VAL_44:[a-zA-Z0-9_.$-]+]] = pto.plt_b32 %[[VAL_42]] : i32 -> !pto.mask<b32>, i32
+// CHECK-NEXT: %[[VAL_45:[a-zA-Z0-9_.$-]+]], %[[VAL_46:[a-zA-Z0-9_.$-]+]] = pto.plt_b32 %[[VAL_44]] : i32 -> !pto.mask<b32>, i32
+// CHECK-NEXT: %[[VAL_47:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_38]]] {dist = "UNPK_B16"} : !pto.ptr<f16, ub> -> !pto.vreg<128xf16>
+// CHECK-NEXT: %[[VAL_48:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_38]], %[[VAL_8]] : index
+// CHECK-NEXT: %[[VAL_49:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_48]]] {dist = "UNPK_B16"} : !pto.ptr<f16, ub> -> !pto.vreg<128xf16>
+// CHECK-NEXT: %[[VAL_50:[a-zA-Z0-9_.$-]+]] = pto.pset_b16 "PAT_ALL" : !pto.mask<b16>
+// CHECK-NEXT: %[[VAL_51:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_47]], %[[VAL_50]] {part = "EVEN"} : !pto.vreg<128xf16>, !pto.mask<b16> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_52:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_49]], %[[VAL_50]] {part = "EVEN"} : !pto.vreg<128xf16>, !pto.mask<b16> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_53:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_54:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_53]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_55:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_56:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_55]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_57:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_58:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_51]], %[[VAL_54]], %[[VAL_57]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_59:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_60:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_52]], %[[VAL_56]], %[[VAL_59]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: pto.vsts %[[VAL_58]], %[[VAL_2]]{{\[}}%[[VAL_39]]], %[[VAL_43]] : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_61:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_39]], %[[VAL_8]] : index
+// CHECK-NEXT: pto.vsts %[[VAL_60]], %[[VAL_2]]{{\[}}%[[VAL_61]]], %[[VAL_45]] : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+// CHECK-NEXT: }
+// CHECK-NEXT: }
+// CHECK-NEXT: return
+// CHECK-NEXT: }
 // CHECK-LABEL: func.func @vmi_to_vpto_quant_matrix_f32_to_f16(
-// CHECK-SAME: %[[QSRC:[^,]+]]: !pto.ptr<f32, ub>
-// CHECK-SAME: %[[INV_SCALE:[^,]+]]: f32
-// CHECK-SAME: %[[QDST:[^,]+]]: !pto.ptr<f16, ub>
-// CHECK: scf.for
-// CHECK: scf.for
-// CHECK-COUNT-2: pto.vlds
-// CHECK-COUNT-2: pto.vmul {{.*}} : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
-// CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<128xf16>
-// CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<128xf16>
-// CHECK-NOT: part = "ODD"
-// CHECK-NOT: pto.vor
-// CHECK-COUNT-2: pto.vsts {{.*}} {dist = "PK_B32"} : !pto.vreg<128xf16>, !pto.ptr<f16, ub>, !pto.mask<b32>
-// CHECK: scf.if
-// CHECK-COUNT-2: pto.vlds
-// CHECK-COUNT-2: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<128xf16>
-// CHECK-NOT: part = "ODD"
-// CHECK-NOT: pto.vor
-// CHECK-COUNT-2: pto.plt_b32 {{.*}} : i32 -> !pto.mask<b32>, i32
-// CHECK-COUNT-2: pto.vsts {{.*}} {dist = "PK_B32"} : !pto.vreg<128xf16>, !pto.ptr<f16, ub>, !pto.mask<b32>
-
+// CHECK-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: !pto.ptr<f32, ub>,
+// CHECK-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: f32,
+// CHECK-SAME: %[[VAL_2:[a-zA-Z0-9_.$-]+]]: !pto.ptr<f16, ub>,
+// CHECK-SAME: %[[VAL_3:[a-zA-Z0-9_.$-]+]]: index,
+// CHECK-SAME: %[[VAL_4:[a-zA-Z0-9_.$-]+]]: index,
+// CHECK-SAME: %[[VAL_5:[a-zA-Z0-9_.$-]+]]: index,
+// CHECK-SAME: %[[VAL_6:[a-zA-Z0-9_.$-]+]]: index,
+// CHECK-SAME: %[[VAL_7:[a-zA-Z0-9_.$-]+]]: index) {
+// CHECK-NEXT: %[[VAL_8:[a-zA-Z0-9_.$-]+]] = arith.constant 128 : i32
+// CHECK-NEXT: %[[VAL_9:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : i32
+// CHECK-NEXT: %[[VAL_10:[a-zA-Z0-9_.$-]+]] = arith.constant 64 : index
+// CHECK-NEXT: %[[VAL_11:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : index
+// CHECK-NEXT: %[[VAL_12:[a-zA-Z0-9_.$-]+]] = arith.constant 1 : index
+// CHECK-NEXT: %[[VAL_13:[a-zA-Z0-9_.$-]+]] = arith.constant 128 : index
+// CHECK-NEXT: %[[VAL_14:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_6]], %[[VAL_13]] : index
+// CHECK-NEXT: %[[VAL_15:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_7]], %[[VAL_13]] : index
+// CHECK-NEXT: %[[VAL_16:[a-zA-Z0-9_.$-]+]] = arith.cmpi ne, %[[VAL_5]], %[[VAL_11]] : index
+// CHECK-NEXT: scf.for %[[VAL_17:[a-zA-Z0-9_.$-]+]] = %[[VAL_11]] to %[[VAL_3]] step %[[VAL_12]] {
+// CHECK-NEXT: %[[VAL_18:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_17]], %[[VAL_14]] : index
+// CHECK-NEXT: %[[VAL_19:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_17]], %[[VAL_15]] : index
+// CHECK-NEXT: scf.for %[[VAL_20:[a-zA-Z0-9_.$-]+]] = %[[VAL_11]] to %[[VAL_4]] step %[[VAL_12]] {
+// CHECK-NEXT: %[[VAL_21:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_20]], %[[VAL_13]] : index
+// CHECK-NEXT: %[[VAL_22:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_18]], %[[VAL_21]] : index
+// CHECK-NEXT: %[[VAL_23:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_19]], %[[VAL_21]] : index
+// CHECK-NEXT: %[[VAL_24:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_22]]] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_25:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_22]], %[[VAL_10]] : index
+// CHECK-NEXT: %[[VAL_26:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_25]]] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_27:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_28:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_27]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_29:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_30:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_29]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_31:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_32:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_24]], %[[VAL_28]], %[[VAL_31]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_33:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_34:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_26]], %[[VAL_30]], %[[VAL_33]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_35:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_36:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_32]], %[[VAL_35]] {part = "EVEN", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<128xf16>
+// CHECK-NEXT: %[[VAL_37:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_34]], %[[VAL_35]] {part = "EVEN", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<128xf16>
+// CHECK-NEXT: %[[VAL_38:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: pto.vsts %[[VAL_36]], %[[VAL_2]]{{\[}}%[[VAL_23]]], %[[VAL_38]] {dist = "PK_B32"} : !pto.vreg<128xf16>, !pto.ptr<f16, ub>, !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_39:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_40:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_23]], %[[VAL_10]] : index
+// CHECK-NEXT: pto.vsts %[[VAL_37]], %[[VAL_2]]{{\[}}%[[VAL_40]]], %[[VAL_39]] {dist = "PK_B32"} : !pto.vreg<128xf16>, !pto.ptr<f16, ub>, !pto.mask<b32>
+// CHECK-NEXT: }
+// CHECK-NEXT: scf.if %[[VAL_16]] {
+// CHECK-NEXT: %[[VAL_41:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_4]], %[[VAL_13]] : index
+// CHECK-NEXT: %[[VAL_42:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_18]], %[[VAL_41]] : index
+// CHECK-NEXT: %[[VAL_43:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_19]], %[[VAL_41]] : index
+// CHECK-NEXT: %[[VAL_44:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_42]]] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_45:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_42]], %[[VAL_10]] : index
+// CHECK-NEXT: %[[VAL_46:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_45]]] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_47:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_48:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_47]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_49:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_50:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_49]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_51:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_52:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_44]], %[[VAL_48]], %[[VAL_51]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_53:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_54:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_46]], %[[VAL_50]], %[[VAL_53]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_55:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_56:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_52]], %[[VAL_55]] {part = "EVEN", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<128xf16>
+// CHECK-NEXT: %[[VAL_57:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_54]], %[[VAL_55]] {part = "EVEN", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<128xf16>
+// CHECK-NEXT: %[[VAL_58:[a-zA-Z0-9_.$-]+]] = arith.index_cast %[[VAL_5]] : index to i32
+// CHECK-NEXT: %[[VAL_59:[a-zA-Z0-9_.$-]+]] = arith.maxsi %[[VAL_58]], %[[VAL_9]] : i32
+// CHECK-NEXT: %[[VAL_60:[a-zA-Z0-9_.$-]+]] = arith.minui %[[VAL_59]], %[[VAL_8]] : i32
+// CHECK-NEXT: %[[VAL_61:[a-zA-Z0-9_.$-]+]], %[[VAL_62:[a-zA-Z0-9_.$-]+]] = pto.plt_b32 %[[VAL_60]] : i32 -> !pto.mask<b32>, i32
+// CHECK-NEXT: %[[VAL_63:[a-zA-Z0-9_.$-]+]], %[[VAL_64:[a-zA-Z0-9_.$-]+]] = pto.plt_b32 %[[VAL_62]] : i32 -> !pto.mask<b32>, i32
+// CHECK-NEXT: pto.vsts %[[VAL_56]], %[[VAL_2]]{{\[}}%[[VAL_43]]], %[[VAL_61]] {dist = "PK_B32"} : !pto.vreg<128xf16>, !pto.ptr<f16, ub>, !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_65:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_43]], %[[VAL_10]] : index
+// CHECK-NEXT: pto.vsts %[[VAL_57]], %[[VAL_2]]{{\[}}%[[VAL_65]]], %[[VAL_63]] {dist = "PK_B32"} : !pto.vreg<128xf16>, !pto.ptr<f16, ub>, !pto.mask<b32>
+// CHECK-NEXT: }
+// CHECK-NEXT: }
+// CHECK-NEXT: return
+// CHECK-NEXT: }
 // CHECK-LABEL: func.func @vmi_to_vpto_dequant_matrix_fp8_to_f32(
-// CHECK-SAME: %[[FSRC:[^,]+]]: !pto.ptr<f8E4M3FN, ub>
-// CHECK-SAME: %[[FSCALE:[^,]+]]: f32
-// CHECK-SAME: %[[FDST:[^,]+]]: !pto.ptr<f32, ub>
-// CHECK: scf.for
-// CHECK: scf.for
-// CHECK-COUNT-4: pto.vlds {{.*}} {dist = "UNPK4"} : !pto.ptr<f8E4M3FN, ub> -> !pto.vreg<256xf8E4M3FN>
-// CHECK-COUNT-4: pto.vcvt {{.*}} {part = "P0"} : !pto.vreg<256xf8E4M3FN>, !pto.mask<b8> -> !pto.vreg<64xf32>
-// CHECK-NOT: part = "P1"
-// CHECK-NOT: part = "P2"
-// CHECK-NOT: part = "P3"
-// CHECK-NOT: pto.vintlv
-// CHECK-COUNT-4: pto.vmul {{.*}} : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
-// CHECK-COUNT-4: pto.vsts
-// CHECK: scf.if
-// CHECK: pto.plt_b32 {{.*}} : i32 -> !pto.mask<b32>, i32
-// CHECK: pto.vsts
-
+// CHECK-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: !pto.ptr<f8E4M3FN, ub>,
+// CHECK-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: f32,
+// CHECK-SAME: %[[VAL_2:[a-zA-Z0-9_.$-]+]]: !pto.ptr<f32, ub>,
+// CHECK-SAME: %[[VAL_3:[a-zA-Z0-9_.$-]+]]: index,
+// CHECK-SAME: %[[VAL_4:[a-zA-Z0-9_.$-]+]]: index,
+// CHECK-SAME: %[[VAL_5:[a-zA-Z0-9_.$-]+]]: index,
+// CHECK-SAME: %[[VAL_6:[a-zA-Z0-9_.$-]+]]: index,
+// CHECK-SAME: %[[VAL_7:[a-zA-Z0-9_.$-]+]]: index) {
+// CHECK-NEXT: %[[VAL_8:[a-zA-Z0-9_.$-]+]] = arith.constant 192 : index
+// CHECK-NEXT: %[[VAL_9:[a-zA-Z0-9_.$-]+]] = arith.constant 64 : index
+// CHECK-NEXT: %[[VAL_10:[a-zA-Z0-9_.$-]+]] = arith.constant 256 : i32
+// CHECK-NEXT: %[[VAL_11:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : i32
+// CHECK-NEXT: %[[VAL_12:[a-zA-Z0-9_.$-]+]] = arith.constant 128 : index
+// CHECK-NEXT: %[[VAL_13:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : index
+// CHECK-NEXT: %[[VAL_14:[a-zA-Z0-9_.$-]+]] = arith.constant 1 : index
+// CHECK-NEXT: %[[VAL_15:[a-zA-Z0-9_.$-]+]] = arith.constant 256 : index
+// CHECK-NEXT: %[[VAL_16:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_6]], %[[VAL_15]] : index
+// CHECK-NEXT: %[[VAL_17:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_7]], %[[VAL_15]] : index
+// CHECK-NEXT: %[[VAL_18:[a-zA-Z0-9_.$-]+]] = arith.cmpi ne, %[[VAL_5]], %[[VAL_13]] : index
+// CHECK-NEXT: scf.for %[[VAL_19:[a-zA-Z0-9_.$-]+]] = %[[VAL_13]] to %[[VAL_3]] step %[[VAL_14]] {
+// CHECK-NEXT: %[[VAL_20:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_19]], %[[VAL_16]] : index
+// CHECK-NEXT: %[[VAL_21:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_19]], %[[VAL_17]] : index
+// CHECK-NEXT: scf.for %[[VAL_22:[a-zA-Z0-9_.$-]+]] = %[[VAL_13]] to %[[VAL_4]] step %[[VAL_14]] {
+// CHECK-NEXT: %[[VAL_23:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_22]], %[[VAL_15]] : index
+// CHECK-NEXT: %[[VAL_24:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_20]], %[[VAL_23]] : index
+// CHECK-NEXT: %[[VAL_25:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_21]], %[[VAL_23]] : index
+// CHECK-NEXT: %[[VAL_26:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_24]]] {dist = "UNPK_B8"} : !pto.ptr<f8E4M3FN, ub> -> !pto.vreg<256xf8E4M3FN>
+// CHECK-NEXT: %[[VAL_27:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_24]], %[[VAL_12]] : index
+// CHECK-NEXT: %[[VAL_28:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_27]]] {dist = "UNPK_B8"} : !pto.ptr<f8E4M3FN, ub> -> !pto.vreg<256xf8E4M3FN>
+// CHECK-NEXT: %[[VAL_29:[a-zA-Z0-9_.$-]+]] = pto.pset_b8 "PAT_ALL" : !pto.mask<b8>
+// CHECK-NEXT: %[[VAL_30:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_26]], %[[VAL_29]] {part = "P0"} : !pto.vreg<256xf8E4M3FN>, !pto.mask<b8> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_31:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_28]], %[[VAL_29]] {part = "P0"} : !pto.vreg<256xf8E4M3FN>, !pto.mask<b8> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_32:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_26]], %[[VAL_29]] {part = "P2"} : !pto.vreg<256xf8E4M3FN>, !pto.mask<b8> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_33:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_28]], %[[VAL_29]] {part = "P2"} : !pto.vreg<256xf8E4M3FN>, !pto.mask<b8> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_34:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_35:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_34]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_36:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_37:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_36]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_38:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_39:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_38]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_40:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_41:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_40]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_42:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_43:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_30]], %[[VAL_35]], %[[VAL_42]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_44:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_45:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_31]], %[[VAL_37]], %[[VAL_44]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_46:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_47:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_32]], %[[VAL_39]], %[[VAL_46]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_48:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_49:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_33]], %[[VAL_41]], %[[VAL_48]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_50:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: pto.vstsx2 %[[VAL_43]], %[[VAL_47]], %[[VAL_2]]{{\[}}%[[VAL_25]]], "INTLV_B32", %[[VAL_50]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.ptr<f32, ub>, index, !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_51:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_52:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_25]], %[[VAL_12]] : index
+// CHECK-NEXT: pto.vstsx2 %[[VAL_45]], %[[VAL_49]], %[[VAL_2]]{{\[}}%[[VAL_52]]], "INTLV_B32", %[[VAL_51]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.ptr<f32, ub>, index, !pto.mask<b32>
+// CHECK-NEXT: }
+// CHECK-NEXT: scf.if %[[VAL_18]] {
+// CHECK-NEXT: %[[VAL_53:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_4]], %[[VAL_15]] : index
+// CHECK-NEXT: %[[VAL_54:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_20]], %[[VAL_53]] : index
+// CHECK-NEXT: %[[VAL_55:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_21]], %[[VAL_53]] : index
+// CHECK-NEXT: %[[VAL_56:[a-zA-Z0-9_.$-]+]] = arith.index_cast %[[VAL_5]] : index to i32
+// CHECK-NEXT: %[[VAL_57:[a-zA-Z0-9_.$-]+]] = arith.maxsi %[[VAL_56]], %[[VAL_11]] : i32
+// CHECK-NEXT: %[[VAL_58:[a-zA-Z0-9_.$-]+]] = arith.minui %[[VAL_57]], %[[VAL_10]] : i32
+// CHECK-NEXT: %[[VAL_59:[a-zA-Z0-9_.$-]+]], %[[VAL_60:[a-zA-Z0-9_.$-]+]] = pto.plt_b32 %[[VAL_58]] : i32 -> !pto.mask<b32>, i32
+// CHECK-NEXT: %[[VAL_61:[a-zA-Z0-9_.$-]+]], %[[VAL_62:[a-zA-Z0-9_.$-]+]] = pto.plt_b32 %[[VAL_60]] : i32 -> !pto.mask<b32>, i32
+// CHECK-NEXT: %[[VAL_63:[a-zA-Z0-9_.$-]+]], %[[VAL_64:[a-zA-Z0-9_.$-]+]] = pto.plt_b32 %[[VAL_62]] : i32 -> !pto.mask<b32>, i32
+// CHECK-NEXT: %[[VAL_65:[a-zA-Z0-9_.$-]+]], %[[VAL_66:[a-zA-Z0-9_.$-]+]] = pto.plt_b32 %[[VAL_64]] : i32 -> !pto.mask<b32>, i32
+// CHECK-NEXT: %[[VAL_67:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_54]]] {dist = "UNPK4"} : !pto.ptr<f8E4M3FN, ub> -> !pto.vreg<256xf8E4M3FN>
+// CHECK-NEXT: %[[VAL_68:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_54]], %[[VAL_9]] : index
+// CHECK-NEXT: %[[VAL_69:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_68]]] {dist = "UNPK4"} : !pto.ptr<f8E4M3FN, ub> -> !pto.vreg<256xf8E4M3FN>
+// CHECK-NEXT: %[[VAL_70:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_54]], %[[VAL_12]] : index
+// CHECK-NEXT: %[[VAL_71:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_70]]] {dist = "UNPK4"} : !pto.ptr<f8E4M3FN, ub> -> !pto.vreg<256xf8E4M3FN>
+// CHECK-NEXT: %[[VAL_72:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_54]], %[[VAL_8]] : index
+// CHECK-NEXT: %[[VAL_73:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_72]]] {dist = "UNPK4"} : !pto.ptr<f8E4M3FN, ub> -> !pto.vreg<256xf8E4M3FN>
+// CHECK-NEXT: %[[VAL_74:[a-zA-Z0-9_.$-]+]] = pto.pset_b8 "PAT_ALL" : !pto.mask<b8>
+// CHECK-NEXT: %[[VAL_75:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_67]], %[[VAL_74]] {part = "P0"} : !pto.vreg<256xf8E4M3FN>, !pto.mask<b8> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_76:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_69]], %[[VAL_74]] {part = "P0"} : !pto.vreg<256xf8E4M3FN>, !pto.mask<b8> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_77:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_71]], %[[VAL_74]] {part = "P0"} : !pto.vreg<256xf8E4M3FN>, !pto.mask<b8> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_78:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_73]], %[[VAL_74]] {part = "P0"} : !pto.vreg<256xf8E4M3FN>, !pto.mask<b8> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_79:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_80:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_79]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_81:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_82:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_81]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_83:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_84:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_83]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_85:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_86:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_85]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_87:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_88:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_75]], %[[VAL_80]], %[[VAL_87]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_89:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_90:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_76]], %[[VAL_82]], %[[VAL_89]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_91:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_92:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_77]], %[[VAL_84]], %[[VAL_91]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_93:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_94:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_78]], %[[VAL_86]], %[[VAL_93]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: pto.vsts %[[VAL_88]], %[[VAL_2]]{{\[}}%[[VAL_55]]], %[[VAL_59]] : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_95:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_55]], %[[VAL_9]] : index
+// CHECK-NEXT: pto.vsts %[[VAL_90]], %[[VAL_2]]{{\[}}%[[VAL_95]]], %[[VAL_61]] : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_96:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_55]], %[[VAL_12]] : index
+// CHECK-NEXT: pto.vsts %[[VAL_92]], %[[VAL_2]]{{\[}}%[[VAL_96]]], %[[VAL_63]] : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_97:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_55]], %[[VAL_8]] : index
+// CHECK-NEXT: pto.vsts %[[VAL_94]], %[[VAL_2]]{{\[}}%[[VAL_97]]], %[[VAL_65]] : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+// CHECK-NEXT: }
+// CHECK-NEXT: }
+// CHECK-NEXT: return
+// CHECK-NEXT: }
 // CHECK-LABEL: func.func @vmi_to_vpto_quant_matrix_f32_to_fp8(
-// CHECK-SAME: %[[FQSRC:[^,]+]]: !pto.ptr<f32, ub>
-// CHECK-SAME: %[[FINV_SCALE:[^,]+]]: f32
-// CHECK-SAME: %[[FQDST:[^,]+]]: !pto.ptr<f8E4M3FN, ub>
-// CHECK: scf.for
-// CHECK: scf.for
-// CHECK-COUNT-4: pto.vlds
-// CHECK: pto.vmul {{.*}} : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
-// CHECK-COUNT-4: pto.vcvt {{.*}} {part = "P0", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<256xf8E4M3FN>
-// CHECK-NOT: part = "P1"
-// CHECK-NOT: part = "P2"
-// CHECK-NOT: part = "P3"
-// CHECK-NOT: pto.vor
-// CHECK-COUNT-4: pto.vsts {{.*}} {dist = "PK4_B32"} : !pto.vreg<256xf8E4M3FN>, !pto.ptr<f8E4M3FN, ub>, !pto.mask<b32>
-// CHECK: scf.if
-// CHECK-COUNT-4: pto.vlds
-// CHECK-COUNT-4: pto.vcvt {{.*}} {part = "P0", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<256xf8E4M3FN>
-// CHECK-NOT: part = "P1"
-// CHECK-NOT: part = "P2"
-// CHECK-NOT: part = "P3"
-// CHECK-NOT: pto.vor
-// CHECK-COUNT-4: pto.plt_b32 {{.*}} : i32 -> !pto.mask<b32>, i32
-// CHECK-COUNT-4: pto.vsts {{.*}} {dist = "PK4_B32"} : !pto.vreg<256xf8E4M3FN>, !pto.ptr<f8E4M3FN, ub>, !pto.mask<b32>
-// CHECK-NOT: pto.vmi.
-// CHECK-NOT: !pto.vmi.
-// CHECK-NOT: unrealized_conversion_cast
+// CHECK-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: !pto.ptr<f32, ub>,
+// CHECK-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: f32,
+// CHECK-SAME: %[[VAL_2:[a-zA-Z0-9_.$-]+]]: !pto.ptr<f8E4M3FN, ub>,
+// CHECK-SAME: %[[VAL_3:[a-zA-Z0-9_.$-]+]]: index,
+// CHECK-SAME: %[[VAL_4:[a-zA-Z0-9_.$-]+]]: index,
+// CHECK-SAME: %[[VAL_5:[a-zA-Z0-9_.$-]+]]: index,
+// CHECK-SAME: %[[VAL_6:[a-zA-Z0-9_.$-]+]]: index,
+// CHECK-SAME: %[[VAL_7:[a-zA-Z0-9_.$-]+]]: index) {
+// CHECK-NEXT: %[[VAL_8:[a-zA-Z0-9_.$-]+]] = arith.constant 256 : i32
+// CHECK-NEXT: %[[VAL_9:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : i32
+// CHECK-NEXT: %[[VAL_10:[a-zA-Z0-9_.$-]+]] = arith.constant 192 : index
+// CHECK-NEXT: %[[VAL_11:[a-zA-Z0-9_.$-]+]] = arith.constant 128 : index
+// CHECK-NEXT: %[[VAL_12:[a-zA-Z0-9_.$-]+]] = arith.constant 64 : index
+// CHECK-NEXT: %[[VAL_13:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : index
+// CHECK-NEXT: %[[VAL_14:[a-zA-Z0-9_.$-]+]] = arith.constant 1 : index
+// CHECK-NEXT: %[[VAL_15:[a-zA-Z0-9_.$-]+]] = arith.constant 256 : index
+// CHECK-NEXT: %[[VAL_16:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_6]], %[[VAL_15]] : index
+// CHECK-NEXT: %[[VAL_17:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_7]], %[[VAL_15]] : index
+// CHECK-NEXT: %[[VAL_18:[a-zA-Z0-9_.$-]+]] = arith.cmpi ne, %[[VAL_5]], %[[VAL_13]] : index
+// CHECK-NEXT: scf.for %[[VAL_19:[a-zA-Z0-9_.$-]+]] = %[[VAL_13]] to %[[VAL_3]] step %[[VAL_14]] {
+// CHECK-NEXT: %[[VAL_20:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_19]], %[[VAL_16]] : index
+// CHECK-NEXT: %[[VAL_21:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_19]], %[[VAL_17]] : index
+// CHECK-NEXT: scf.for %[[VAL_22:[a-zA-Z0-9_.$-]+]] = %[[VAL_13]] to %[[VAL_4]] step %[[VAL_14]] {
+// CHECK-NEXT: %[[VAL_23:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_22]], %[[VAL_15]] : index
+// CHECK-NEXT: %[[VAL_24:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_20]], %[[VAL_23]] : index
+// CHECK-NEXT: %[[VAL_25:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_21]], %[[VAL_23]] : index
+// CHECK-NEXT: %[[VAL_26:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_24]]] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_27:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_24]], %[[VAL_12]] : index
+// CHECK-NEXT: %[[VAL_28:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_27]]] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_29:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_24]], %[[VAL_11]] : index
+// CHECK-NEXT: %[[VAL_30:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_29]]] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_31:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_24]], %[[VAL_10]] : index
+// CHECK-NEXT: %[[VAL_32:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_31]]] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_33:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_34:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_33]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_35:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_36:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_35]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_37:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_38:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_37]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_39:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_40:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_39]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_41:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_42:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_26]], %[[VAL_34]], %[[VAL_41]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_43:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_44:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_28]], %[[VAL_36]], %[[VAL_43]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_45:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_46:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_30]], %[[VAL_38]], %[[VAL_45]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_47:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_48:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_32]], %[[VAL_40]], %[[VAL_47]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_49:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_50:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_42]], %[[VAL_49]] {part = "P0", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<256xf8E4M3FN>
+// CHECK-NEXT: %[[VAL_51:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_44]], %[[VAL_49]] {part = "P0", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<256xf8E4M3FN>
+// CHECK-NEXT: %[[VAL_52:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_46]], %[[VAL_49]] {part = "P0", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<256xf8E4M3FN>
+// CHECK-NEXT: %[[VAL_53:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_48]], %[[VAL_49]] {part = "P0", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<256xf8E4M3FN>
+// CHECK-NEXT: %[[VAL_54:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: pto.vsts %[[VAL_50]], %[[VAL_2]]{{\[}}%[[VAL_25]]], %[[VAL_54]] {dist = "PK4_B32"} : !pto.vreg<256xf8E4M3FN>, !pto.ptr<f8E4M3FN, ub>, !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_55:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_56:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_25]], %[[VAL_12]] : index
+// CHECK-NEXT: pto.vsts %[[VAL_51]], %[[VAL_2]]{{\[}}%[[VAL_56]]], %[[VAL_55]] {dist = "PK4_B32"} : !pto.vreg<256xf8E4M3FN>, !pto.ptr<f8E4M3FN, ub>, !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_57:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_58:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_25]], %[[VAL_11]] : index
+// CHECK-NEXT: pto.vsts %[[VAL_52]], %[[VAL_2]]{{\[}}%[[VAL_58]]], %[[VAL_57]] {dist = "PK4_B32"} : !pto.vreg<256xf8E4M3FN>, !pto.ptr<f8E4M3FN, ub>, !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_59:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_60:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_25]], %[[VAL_10]] : index
+// CHECK-NEXT: pto.vsts %[[VAL_53]], %[[VAL_2]]{{\[}}%[[VAL_60]]], %[[VAL_59]] {dist = "PK4_B32"} : !pto.vreg<256xf8E4M3FN>, !pto.ptr<f8E4M3FN, ub>, !pto.mask<b32>
+// CHECK-NEXT: }
+// CHECK-NEXT: scf.if %[[VAL_18]] {
+// CHECK-NEXT: %[[VAL_61:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_4]], %[[VAL_15]] : index
+// CHECK-NEXT: %[[VAL_62:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_20]], %[[VAL_61]] : index
+// CHECK-NEXT: %[[VAL_63:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_21]], %[[VAL_61]] : index
+// CHECK-NEXT: %[[VAL_64:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_62]]] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_65:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_62]], %[[VAL_12]] : index
+// CHECK-NEXT: %[[VAL_66:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_65]]] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_67:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_62]], %[[VAL_11]] : index
+// CHECK-NEXT: %[[VAL_68:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_67]]] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_69:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_62]], %[[VAL_10]] : index
+// CHECK-NEXT: %[[VAL_70:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_69]]] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_71:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_72:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_71]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_73:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_74:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_73]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_75:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_76:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_75]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_77:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_78:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_1]], %[[VAL_77]] : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_79:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_80:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_64]], %[[VAL_72]], %[[VAL_79]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_81:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_82:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_66]], %[[VAL_74]], %[[VAL_81]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_83:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_84:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_68]], %[[VAL_76]], %[[VAL_83]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_85:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_86:[a-zA-Z0-9_.$-]+]] = pto.vmul %[[VAL_70]], %[[VAL_78]], %[[VAL_85]] : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NEXT: %[[VAL_87:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_88:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_80]], %[[VAL_87]] {part = "P0", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<256xf8E4M3FN>
+// CHECK-NEXT: %[[VAL_89:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_82]], %[[VAL_87]] {part = "P0", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<256xf8E4M3FN>
+// CHECK-NEXT: %[[VAL_90:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_84]], %[[VAL_87]] {part = "P0", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<256xf8E4M3FN>
+// CHECK-NEXT: %[[VAL_91:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_86]], %[[VAL_87]] {part = "P0", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<256xf8E4M3FN>
+// CHECK-NEXT: %[[VAL_92:[a-zA-Z0-9_.$-]+]] = arith.index_cast %[[VAL_5]] : index to i32
+// CHECK-NEXT: %[[VAL_93:[a-zA-Z0-9_.$-]+]] = arith.maxsi %[[VAL_92]], %[[VAL_9]] : i32
+// CHECK-NEXT: %[[VAL_94:[a-zA-Z0-9_.$-]+]] = arith.minui %[[VAL_93]], %[[VAL_8]] : i32
+// CHECK-NEXT: %[[VAL_95:[a-zA-Z0-9_.$-]+]], %[[VAL_96:[a-zA-Z0-9_.$-]+]] = pto.plt_b32 %[[VAL_94]] : i32 -> !pto.mask<b32>, i32
+// CHECK-NEXT: %[[VAL_97:[a-zA-Z0-9_.$-]+]], %[[VAL_98:[a-zA-Z0-9_.$-]+]] = pto.plt_b32 %[[VAL_96]] : i32 -> !pto.mask<b32>, i32
+// CHECK-NEXT: %[[VAL_99:[a-zA-Z0-9_.$-]+]], %[[VAL_100:[a-zA-Z0-9_.$-]+]] = pto.plt_b32 %[[VAL_98]] : i32 -> !pto.mask<b32>, i32
+// CHECK-NEXT: %[[VAL_101:[a-zA-Z0-9_.$-]+]], %[[VAL_102:[a-zA-Z0-9_.$-]+]] = pto.plt_b32 %[[VAL_100]] : i32 -> !pto.mask<b32>, i32
+// CHECK-NEXT: pto.vsts %[[VAL_88]], %[[VAL_2]]{{\[}}%[[VAL_63]]], %[[VAL_95]] {dist = "PK4_B32"} : !pto.vreg<256xf8E4M3FN>, !pto.ptr<f8E4M3FN, ub>, !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_103:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_63]], %[[VAL_12]] : index
+// CHECK-NEXT: pto.vsts %[[VAL_89]], %[[VAL_2]]{{\[}}%[[VAL_103]]], %[[VAL_97]] {dist = "PK4_B32"} : !pto.vreg<256xf8E4M3FN>, !pto.ptr<f8E4M3FN, ub>, !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_104:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_63]], %[[VAL_11]] : index
+// CHECK-NEXT: pto.vsts %[[VAL_90]], %[[VAL_2]]{{\[}}%[[VAL_104]]], %[[VAL_99]] {dist = "PK4_B32"} : !pto.vreg<256xf8E4M3FN>, !pto.ptr<f8E4M3FN, ub>, !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_105:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_63]], %[[VAL_10]] : index
+// CHECK-NEXT: pto.vsts %[[VAL_91]], %[[VAL_2]]{{\[}}%[[VAL_105]]], %[[VAL_101]] {dist = "PK4_B32"} : !pto.vreg<256xf8E4M3FN>, !pto.ptr<f8E4M3FN, ub>, !pto.mask<b32>
+// CHECK-NEXT: }
+// CHECK-NEXT: }
+// CHECK-NEXT: return
+// CHECK-NEXT: }

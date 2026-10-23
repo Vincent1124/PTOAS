@@ -28,10 +28,9 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     return
   }
 
-  // 256-lane d4 path: Packed4 widen produces 4 bf16x2 registers; the store
-  // reorders them through a vintlv tree. bf16x2 has no dedicated vintlv
-  // intrinsic, so the tree lowers to the <64 x i32> intrinsic (bf16x2 is a
-  // 32-bit packed pair at the LLVM ABI; vintlv is a bit-level lane shuffle).
+  // 256-lane path: Packed4 widen produces four bf16x2 registers. The solver
+  // folds their reordering into two interleaved paired stores, avoiding a
+  // software vintlv tree. bf16x2 uses <64 x i32> at the LLVM ABI.
   func.func @f4x2_to_bf16x2_d4_vcvt_store(
       %src: !pto.ptr<!pto.f4E1M2x2, ub>,
       %dst: !pto.ptr<!pto.bf16x2, ub>) attributes {pto.kernel} {
@@ -65,5 +64,11 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
 // LLVM-LABEL: define void @f4x2_to_bf16x2_d4_vcvt_store_mix_aiv
 // LLVM: call <128 x bfloat> @llvm.hivm.vcvtff2.f4e1m2x22bf16.x(<256 x float4e1m2x2> {{.*}}, <256 x i1> {{.*}}, i32 0)
-// LLVM-COUNT-4: call { <64 x i32>, <64 x i32> } @llvm.hivm.vintlv.v64i32(<64 x i32> {{.*}}, <64 x i32> {{.*}})
-// LLVM-COUNT-4: call void @llvm.hivm.vstsx1.v64bf16x2(<64 x i32> {{.*}}, ptr addrspace(6) {{.*}}, i32 {{.*}}, i32 2, i32 0, <256 x i1> {{.*}})
+// LLVM: call <128 x bfloat> @llvm.hivm.vcvtff2.f4e1m2x22bf16.x(<256 x float4e1m2x2> {{.*}}, <256 x i1> {{.*}}, i32 2)
+// LLVM: call <128 x bfloat> @llvm.hivm.vcvtff2.f4e1m2x22bf16.x(<256 x float4e1m2x2> {{.*}}, <256 x i1> {{.*}}, i32 0)
+// LLVM: call <128 x bfloat> @llvm.hivm.vcvtff2.f4e1m2x22bf16.x(<256 x float4e1m2x2> {{.*}}, <256 x i1> {{.*}}, i32 2)
+// LLVM-NOT: @llvm.hivm.vintlv
+// LLVM: call void @llvm.hivm.vstsx2.v64bf16x2(<64 x i32> {{.*}}, <64 x i32> {{.*}}, ptr addrspace(6) {{.*}}, i32 0, i32 11, i32 0, <256 x i1> {{.*}})
+// LLVM: call void @llvm.hivm.vstsx2.v64bf16x2(<64 x i32> {{.*}}, <64 x i32> {{.*}}, ptr addrspace(6) {{.*}}, i32 512, i32 11, i32 0, <256 x i1> {{.*}})
+// LLVM-NOT: call void @llvm.hivm.vsts
+// LLVM: ret void

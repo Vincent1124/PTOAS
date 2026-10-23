@@ -54,6 +54,7 @@ def _run_ptoas(
     insert_sync: bool | None = None,
     backend: str | None = None,
     pto_level: str | None = None,
+    ptoas_flags: tuple[str, ...] = (),
 ) -> None:
     ptoas = resolve_ptoas_binary()
     cmd = [
@@ -66,6 +67,7 @@ def _run_ptoas(
         cmd.append(f"--pto-level={pto_level}")
     if insert_sync is True:
         cmd.append("--enable-insert-sync")
+    cmd.extend(ptoas_flags)
     cmd.extend([
         "--enable-tile-op-expand",
         str(mlir_path),
@@ -88,9 +90,13 @@ def _effective_pto_level(*, mode: str) -> str | None:
 
 
 def _source_ptoas_overrides(module_spec) -> dict:
-    if getattr(module_spec, "jit_source", None) is None:
-        return {}
-    return {"backend": module_spec.backend}
+    overrides = {}
+    if getattr(module_spec, "jit_source", None) is not None:
+        overrides["backend"] = module_spec.backend
+    flags = getattr(module_spec, "ptoas_flags", ())
+    if flags:
+        overrides["ptoas_flags"] = flags
+    return overrides
 
 
 def _resolve_ptoas_backend(module_spec, ptoas_overrides: dict) -> str | None:
@@ -149,6 +155,7 @@ def compile_config_text(
             f"insert_sync={effective_insert_sync}",
             f"pto_level={effective_pto_level}",
             f"backend={ptoas_overrides.get('backend')}",
+            f"ptoas_flags={getattr(module_spec, 'ptoas_flags', ())!r}",
             "enable_tile_op_expand=True",
             *_host_source_config_lines(native_options_of(module_spec)),
         ]

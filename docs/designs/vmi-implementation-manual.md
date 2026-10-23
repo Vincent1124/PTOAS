@@ -3788,6 +3788,11 @@ f32 <-> 8-bit fp-like, *spine-scoped composite* path (pure narrow round trip):
 
 `group_broadcast_load` E2B explicitization (`vmi-expand-implicit-ensure-layouts`):
 
+This pass is opt-in and is not part of the default PTOAS semantic pipeline. The
+default pipeline preserves the layout selected by the solver so any
+materialization cost remains represented by the solver's cost graph. Callers
+that need the compatibility rewrite below can add the pass explicitly.
+
 The layout solver keeps the direct E2B layout as a lowering *preference*, so a
 `group_broadcast_load` result can still be materialized as contiguous, where
 vmi-to-vpto cannot lower a multi-part contiguous E2B form as one packet. The

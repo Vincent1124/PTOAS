@@ -60,27 +60,164 @@ module {
   }
 }
 
-// CHECK-LABEL: func.func @vmi_to_vpto_iota_signed_base_64
-// CHECK: pto.vci
-// CHECK-LABEL: func.func @vmi_to_vpto_iota_signed_base_split
-// CHECK: arith.constant 64 : i32
-// CHECK: arith.addi {{.*}}, {{.*}} : i32
-// CHECK: builtin.unrealized_conversion_cast {{.*}} : i32 to si32
-// CHECK: pto.vci
-// CHECK-NOT: arith.constant 64 : si32
-// CHECK-LABEL: func.func @vmi_to_vpto_iota_signed_base_desc_split
-// CHECK: arith.constant 64 : i32
-// CHECK: arith.subi {{.*}}, {{.*}} : i32
-// CHECK: builtin.unrealized_conversion_cast {{.*}} : i32 to si32
-// CHECK-LABEL: func.func @vmi_to_vpto_iota_signed_base_256
-// CHECK: arith.constant 192 : i32
-// CHECK: arith.constant 128 : i32
-// CHECK: arith.constant 64 : i32
-// CHECK: pto.vci
-// CHECK-LABEL: func.func @vmi_to_vpto_iota_unsigned_base_256
-// CHECK: arith.constant 192 : i32
-// CHECK: arith.constant 128 : i32
-// CHECK: arith.constant 64 : i32
-// CHECK: arith.addi {{.*}}, {{.*}} : i32
-// CHECK: builtin.unrealized_conversion_cast {{.*}} : i32 to ui32
-// CHECK: pto.vci
+// CHECK-LABEL: func.func @vmi_to_vpto_iota_signed_base_64(
+// CHECK-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: si32,
+// CHECK-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: !pto.ptr<si32, ub>) {
+// CHECK-NEXT: %[[VAL_2:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : index
+// CHECK-NEXT: %[[VAL_3:[a-zA-Z0-9_.$-]+]] = pto.vci %[[VAL_0]] : si32 -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_4:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: pto.vsts %[[VAL_3]], %[[VAL_1]]{{\[}}%[[VAL_2]]], %[[VAL_4]] : !pto.vreg<64xsi32>, !pto.ptr<si32, ub>, !pto.mask<b32>
+// CHECK-NEXT: return
+// CHECK-NEXT: }
+// CHECK-LABEL: func.func @vmi_to_vpto_iota_signed_base_split(
+// CHECK-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: si32,
+// CHECK-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: !pto.ptr<si32, ub>) {
+// CHECK-NEXT: %[[VAL_2:[a-zA-Z0-9_.$-]+]] = arith.constant 1 : i32
+// CHECK-NEXT: %[[VAL_3:[a-zA-Z0-9_.$-]+]] = arith.constant 2 : i32
+// CHECK-NEXT: %[[VAL_4:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : i32
+// CHECK-NEXT: %[[VAL_5:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : index
+// CHECK-NEXT: %[[VAL_6:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_7:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_4]] : i32 to si32
+// CHECK-NEXT: %[[VAL_8:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_3]] : i32 to si32
+// CHECK-NEXT: %[[VAL_9:[a-zA-Z0-9_.$-]+]] = pto.vci %[[VAL_7]] : si32 -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_10:[a-zA-Z0-9_.$-]+]] = pto.vmuls %[[VAL_9]], %[[VAL_8]], %[[VAL_6]] : !pto.vreg<64xsi32>, si32, !pto.mask<b32> -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_11:[a-zA-Z0-9_.$-]+]] = pto.vadds %[[VAL_10]], %[[VAL_0]], %[[VAL_6]] : !pto.vreg<64xsi32>, si32, !pto.mask<b32> -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_12:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_13:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_4]] : i32 to si32
+// CHECK-NEXT: %[[VAL_14:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_3]] : i32 to si32
+// CHECK-NEXT: %[[VAL_15:[a-zA-Z0-9_.$-]+]] = pto.vci %[[VAL_13]] : si32 -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_16:[a-zA-Z0-9_.$-]+]] = pto.vmuls %[[VAL_15]], %[[VAL_14]], %[[VAL_12]] : !pto.vreg<64xsi32>, si32, !pto.mask<b32> -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_17:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_0]] : si32 to i32
+// CHECK-NEXT: %[[VAL_18:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_17]], %[[VAL_2]] : i32
+// CHECK-NEXT: %[[VAL_19:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_18]] : i32 to si32
+// CHECK-NEXT: %[[VAL_20:[a-zA-Z0-9_.$-]+]] = pto.vadds %[[VAL_16]], %[[VAL_19]], %[[VAL_12]] : !pto.vreg<64xsi32>, si32, !pto.mask<b32> -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_21:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: pto.vstsx2 %[[VAL_11]], %[[VAL_20]], %[[VAL_1]]{{\[}}%[[VAL_5]]], "INTLV_B32", %[[VAL_21]] : !pto.vreg<64xsi32>, !pto.vreg<64xsi32>, !pto.ptr<si32, ub>, index, !pto.mask<b32>
+// CHECK-NEXT: return
+// CHECK-NEXT: }
+// CHECK-LABEL: func.func @vmi_to_vpto_iota_signed_base_desc_split(
+// CHECK-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: si32,
+// CHECK-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: !pto.ptr<si32, ub>) {
+// CHECK-NEXT: %[[VAL_2:[a-zA-Z0-9_.$-]+]] = arith.constant 1 : i32
+// CHECK-NEXT: %[[VAL_3:[a-zA-Z0-9_.$-]+]] = arith.constant 2 : i32
+// CHECK-NEXT: %[[VAL_4:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : i32
+// CHECK-NEXT: %[[VAL_5:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : index
+// CHECK-NEXT: %[[VAL_6:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_7:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_4]] : i32 to si32
+// CHECK-NEXT: %[[VAL_8:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_3]] : i32 to si32
+// CHECK-NEXT: %[[VAL_9:[a-zA-Z0-9_.$-]+]] = pto.vci %[[VAL_7]] : si32 -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_10:[a-zA-Z0-9_.$-]+]] = pto.vmuls %[[VAL_9]], %[[VAL_8]], %[[VAL_6]] : !pto.vreg<64xsi32>, si32, !pto.mask<b32> -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_11:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_0]], %[[VAL_6]] : si32, !pto.mask<b32> -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_12:[a-zA-Z0-9_.$-]+]] = pto.vsub %[[VAL_11]], %[[VAL_10]], %[[VAL_6]] : !pto.vreg<64xsi32>, !pto.vreg<64xsi32>, !pto.mask<b32> -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_13:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_14:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_4]] : i32 to si32
+// CHECK-NEXT: %[[VAL_15:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_3]] : i32 to si32
+// CHECK-NEXT: %[[VAL_16:[a-zA-Z0-9_.$-]+]] = pto.vci %[[VAL_14]] : si32 -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_17:[a-zA-Z0-9_.$-]+]] = pto.vmuls %[[VAL_16]], %[[VAL_15]], %[[VAL_13]] : !pto.vreg<64xsi32>, si32, !pto.mask<b32> -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_18:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_0]] : si32 to i32
+// CHECK-NEXT: %[[VAL_19:[a-zA-Z0-9_.$-]+]] = arith.subi %[[VAL_18]], %[[VAL_2]] : i32
+// CHECK-NEXT: %[[VAL_20:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_19]] : i32 to si32
+// CHECK-NEXT: %[[VAL_21:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_20]], %[[VAL_13]] : si32, !pto.mask<b32> -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_22:[a-zA-Z0-9_.$-]+]] = pto.vsub %[[VAL_21]], %[[VAL_17]], %[[VAL_13]] : !pto.vreg<64xsi32>, !pto.vreg<64xsi32>, !pto.mask<b32> -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_23:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: pto.vstsx2 %[[VAL_12]], %[[VAL_22]], %[[VAL_1]]{{\[}}%[[VAL_5]]], "INTLV_B32", %[[VAL_23]] : !pto.vreg<64xsi32>, !pto.vreg<64xsi32>, !pto.ptr<si32, ub>, index, !pto.mask<b32>
+// CHECK-NEXT: return
+// CHECK-NEXT: }
+// CHECK-LABEL: func.func @vmi_to_vpto_iota_signed_base_256(
+// CHECK-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: si32,
+// CHECK-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: !pto.ptr<si32, ub>) {
+// CHECK-NEXT: %[[VAL_2:[a-zA-Z0-9_.$-]+]] = arith.constant 128 : index
+// CHECK-NEXT: %[[VAL_3:[a-zA-Z0-9_.$-]+]] = arith.constant 129 : i32
+// CHECK-NEXT: %[[VAL_4:[a-zA-Z0-9_.$-]+]] = arith.constant 1 : i32
+// CHECK-NEXT: %[[VAL_5:[a-zA-Z0-9_.$-]+]] = arith.constant 128 : i32
+// CHECK-NEXT: %[[VAL_6:[a-zA-Z0-9_.$-]+]] = arith.constant 2 : i32
+// CHECK-NEXT: %[[VAL_7:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : i32
+// CHECK-NEXT: %[[VAL_8:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : index
+// CHECK-NEXT: %[[VAL_9:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_10:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_7]] : i32 to si32
+// CHECK-NEXT: %[[VAL_11:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_6]] : i32 to si32
+// CHECK-NEXT: %[[VAL_12:[a-zA-Z0-9_.$-]+]] = pto.vci %[[VAL_10]] : si32 -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_13:[a-zA-Z0-9_.$-]+]] = pto.vmuls %[[VAL_12]], %[[VAL_11]], %[[VAL_9]] : !pto.vreg<64xsi32>, si32, !pto.mask<b32> -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_14:[a-zA-Z0-9_.$-]+]] = pto.vadds %[[VAL_13]], %[[VAL_0]], %[[VAL_9]] : !pto.vreg<64xsi32>, si32, !pto.mask<b32> -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_15:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_16:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_7]] : i32 to si32
+// CHECK-NEXT: %[[VAL_17:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_6]] : i32 to si32
+// CHECK-NEXT: %[[VAL_18:[a-zA-Z0-9_.$-]+]] = pto.vci %[[VAL_16]] : si32 -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_19:[a-zA-Z0-9_.$-]+]] = pto.vmuls %[[VAL_18]], %[[VAL_17]], %[[VAL_15]] : !pto.vreg<64xsi32>, si32, !pto.mask<b32> -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_20:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_0]] : si32 to i32
+// CHECK-NEXT: %[[VAL_21:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_20]], %[[VAL_5]] : i32
+// CHECK-NEXT: %[[VAL_22:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_21]] : i32 to si32
+// CHECK-NEXT: %[[VAL_23:[a-zA-Z0-9_.$-]+]] = pto.vadds %[[VAL_19]], %[[VAL_22]], %[[VAL_15]] : !pto.vreg<64xsi32>, si32, !pto.mask<b32> -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_24:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_25:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_7]] : i32 to si32
+// CHECK-NEXT: %[[VAL_26:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_6]] : i32 to si32
+// CHECK-NEXT: %[[VAL_27:[a-zA-Z0-9_.$-]+]] = pto.vci %[[VAL_25]] : si32 -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_28:[a-zA-Z0-9_.$-]+]] = pto.vmuls %[[VAL_27]], %[[VAL_26]], %[[VAL_24]] : !pto.vreg<64xsi32>, si32, !pto.mask<b32> -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_29:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_0]] : si32 to i32
+// CHECK-NEXT: %[[VAL_30:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_29]], %[[VAL_4]] : i32
+// CHECK-NEXT: %[[VAL_31:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_30]] : i32 to si32
+// CHECK-NEXT: %[[VAL_32:[a-zA-Z0-9_.$-]+]] = pto.vadds %[[VAL_28]], %[[VAL_31]], %[[VAL_24]] : !pto.vreg<64xsi32>, si32, !pto.mask<b32> -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_33:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_34:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_7]] : i32 to si32
+// CHECK-NEXT: %[[VAL_35:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_6]] : i32 to si32
+// CHECK-NEXT: %[[VAL_36:[a-zA-Z0-9_.$-]+]] = pto.vci %[[VAL_34]] : si32 -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_37:[a-zA-Z0-9_.$-]+]] = pto.vmuls %[[VAL_36]], %[[VAL_35]], %[[VAL_33]] : !pto.vreg<64xsi32>, si32, !pto.mask<b32> -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_38:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_0]] : si32 to i32
+// CHECK-NEXT: %[[VAL_39:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_38]], %[[VAL_3]] : i32
+// CHECK-NEXT: %[[VAL_40:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_39]] : i32 to si32
+// CHECK-NEXT: %[[VAL_41:[a-zA-Z0-9_.$-]+]] = pto.vadds %[[VAL_37]], %[[VAL_40]], %[[VAL_33]] : !pto.vreg<64xsi32>, si32, !pto.mask<b32> -> !pto.vreg<64xsi32>
+// CHECK-NEXT: %[[VAL_42:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: pto.vstsx2 %[[VAL_14]], %[[VAL_32]], %[[VAL_1]]{{\[}}%[[VAL_8]]], "INTLV_B32", %[[VAL_42]] : !pto.vreg<64xsi32>, !pto.vreg<64xsi32>, !pto.ptr<si32, ub>, index, !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_43:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: pto.vstsx2 %[[VAL_23]], %[[VAL_41]], %[[VAL_1]]{{\[}}%[[VAL_2]]], "INTLV_B32", %[[VAL_43]] : !pto.vreg<64xsi32>, !pto.vreg<64xsi32>, !pto.ptr<si32, ub>, index, !pto.mask<b32>
+// CHECK-NEXT: return
+// CHECK-NEXT: }
+// CHECK-LABEL: func.func @vmi_to_vpto_iota_unsigned_base_256(
+// CHECK-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: ui32,
+// CHECK-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: !pto.ptr<ui32, ub>) {
+// CHECK-NEXT: %[[VAL_2:[a-zA-Z0-9_.$-]+]] = arith.constant 128 : index
+// CHECK-NEXT: %[[VAL_3:[a-zA-Z0-9_.$-]+]] = arith.constant 129 : i32
+// CHECK-NEXT: %[[VAL_4:[a-zA-Z0-9_.$-]+]] = arith.constant 1 : i32
+// CHECK-NEXT: %[[VAL_5:[a-zA-Z0-9_.$-]+]] = arith.constant 128 : i32
+// CHECK-NEXT: %[[VAL_6:[a-zA-Z0-9_.$-]+]] = arith.constant 2 : i32
+// CHECK-NEXT: %[[VAL_7:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : i32
+// CHECK-NEXT: %[[VAL_8:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : index
+// CHECK-NEXT: %[[VAL_9:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_10:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_7]] : i32 to ui32
+// CHECK-NEXT: %[[VAL_11:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_6]] : i32 to ui32
+// CHECK-NEXT: %[[VAL_12:[a-zA-Z0-9_.$-]+]] = pto.vci %[[VAL_10]] : ui32 -> !pto.vreg<64xui32>
+// CHECK-NEXT: %[[VAL_13:[a-zA-Z0-9_.$-]+]] = pto.vmuls %[[VAL_12]], %[[VAL_11]], %[[VAL_9]] : !pto.vreg<64xui32>, ui32, !pto.mask<b32> -> !pto.vreg<64xui32>
+// CHECK-NEXT: %[[VAL_14:[a-zA-Z0-9_.$-]+]] = pto.vadds %[[VAL_13]], %[[VAL_0]], %[[VAL_9]] : !pto.vreg<64xui32>, ui32, !pto.mask<b32> -> !pto.vreg<64xui32>
+// CHECK-NEXT: %[[VAL_15:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_16:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_7]] : i32 to ui32
+// CHECK-NEXT: %[[VAL_17:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_6]] : i32 to ui32
+// CHECK-NEXT: %[[VAL_18:[a-zA-Z0-9_.$-]+]] = pto.vci %[[VAL_16]] : ui32 -> !pto.vreg<64xui32>
+// CHECK-NEXT: %[[VAL_19:[a-zA-Z0-9_.$-]+]] = pto.vmuls %[[VAL_18]], %[[VAL_17]], %[[VAL_15]] : !pto.vreg<64xui32>, ui32, !pto.mask<b32> -> !pto.vreg<64xui32>
+// CHECK-NEXT: %[[VAL_20:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_0]] : ui32 to i32
+// CHECK-NEXT: %[[VAL_21:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_20]], %[[VAL_5]] : i32
+// CHECK-NEXT: %[[VAL_22:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_21]] : i32 to ui32
+// CHECK-NEXT: %[[VAL_23:[a-zA-Z0-9_.$-]+]] = pto.vadds %[[VAL_19]], %[[VAL_22]], %[[VAL_15]] : !pto.vreg<64xui32>, ui32, !pto.mask<b32> -> !pto.vreg<64xui32>
+// CHECK-NEXT: %[[VAL_24:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_25:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_7]] : i32 to ui32
+// CHECK-NEXT: %[[VAL_26:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_6]] : i32 to ui32
+// CHECK-NEXT: %[[VAL_27:[a-zA-Z0-9_.$-]+]] = pto.vci %[[VAL_25]] : ui32 -> !pto.vreg<64xui32>
+// CHECK-NEXT: %[[VAL_28:[a-zA-Z0-9_.$-]+]] = pto.vmuls %[[VAL_27]], %[[VAL_26]], %[[VAL_24]] : !pto.vreg<64xui32>, ui32, !pto.mask<b32> -> !pto.vreg<64xui32>
+// CHECK-NEXT: %[[VAL_29:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_0]] : ui32 to i32
+// CHECK-NEXT: %[[VAL_30:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_29]], %[[VAL_4]] : i32
+// CHECK-NEXT: %[[VAL_31:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_30]] : i32 to ui32
+// CHECK-NEXT: %[[VAL_32:[a-zA-Z0-9_.$-]+]] = pto.vadds %[[VAL_28]], %[[VAL_31]], %[[VAL_24]] : !pto.vreg<64xui32>, ui32, !pto.mask<b32> -> !pto.vreg<64xui32>
+// CHECK-NEXT: %[[VAL_33:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_34:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_7]] : i32 to ui32
+// CHECK-NEXT: %[[VAL_35:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_6]] : i32 to ui32
+// CHECK-NEXT: %[[VAL_36:[a-zA-Z0-9_.$-]+]] = pto.vci %[[VAL_34]] : ui32 -> !pto.vreg<64xui32>
+// CHECK-NEXT: %[[VAL_37:[a-zA-Z0-9_.$-]+]] = pto.vmuls %[[VAL_36]], %[[VAL_35]], %[[VAL_33]] : !pto.vreg<64xui32>, ui32, !pto.mask<b32> -> !pto.vreg<64xui32>
+// CHECK-NEXT: %[[VAL_38:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_0]] : ui32 to i32
+// CHECK-NEXT: %[[VAL_39:[a-zA-Z0-9_.$-]+]] = arith.addi %[[VAL_38]], %[[VAL_3]] : i32
+// CHECK-NEXT: %[[VAL_40:[a-zA-Z0-9_.$-]+]] = builtin.unrealized_conversion_cast %[[VAL_39]] : i32 to ui32
+// CHECK-NEXT: %[[VAL_41:[a-zA-Z0-9_.$-]+]] = pto.vadds %[[VAL_37]], %[[VAL_40]], %[[VAL_33]] : !pto.vreg<64xui32>, ui32, !pto.mask<b32> -> !pto.vreg<64xui32>
+// CHECK-NEXT: %[[VAL_42:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: pto.vstsx2 %[[VAL_14]], %[[VAL_32]], %[[VAL_1]]{{\[}}%[[VAL_8]]], "INTLV_B32", %[[VAL_42]] : !pto.vreg<64xui32>, !pto.vreg<64xui32>, !pto.ptr<ui32, ub>, index, !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_43:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: pto.vstsx2 %[[VAL_23]], %[[VAL_41]], %[[VAL_1]]{{\[}}%[[VAL_2]]], "INTLV_B32", %[[VAL_43]] : !pto.vreg<64xui32>, !pto.vreg<64xui32>, !pto.ptr<ui32, ub>, index, !pto.mask<b32>
+// CHECK-NEXT: return
+// CHECK-NEXT: }

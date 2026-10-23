@@ -1,0 +1,45 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-mask-granularity-assignment -vmi-layout-assignment -vmi-to-vpto | FileCheck %s --implicit-check-not=pto.vmi. --implicit-check-not='!pto.vmi.' --implicit-check-not=unrealized_conversion_cast
+
+// A group-slot seed belongs to the four loaded groups, not to the dense
+// 128-lane consumers or the 64-lane packed cast. Width-changing bitcasts
+// must still enumerate their contiguous relation in this component.
+module {
+  func.func @group_broadcast_packed_bitcast(
+      %src: !pto.ptr<f32, ub>, %dst: !pto.ptr<!pto.f4E2M1x2, ub>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c128 = arith.constant 128 : index
+    %mask = pto.vmi.create_mask %c128 : index -> !pto.vmi.mask<128xpred>
+    %x = pto.vmi.vload %src[%c0] : !pto.ptr<f32, ub> -> !pto.vmi.vreg<128xf32>
+    %groups = pto.vmi.vload %src[%c0], %c1 {group = 4} : !pto.ptr<f32, ub> -> !pto.vmi.vreg<4xf32>
+    %brc = pto.vmi.vbrc %groups {group = 4} : !pto.vmi.vreg<4xf32> -> !pto.vmi.vreg<128xf32>
+    %scaled = pto.vmi.vmul %x, %brc, %mask : !pto.vmi.vreg<128xf32>, !pto.vmi.vreg<128xf32>, !pto.vmi.mask<128xpred> -> !pto.vmi.vreg<128xf32>
+    %low, %high = pto.vmi.vunzip %scaled : !pto.vmi.vreg<128xf32> -> !pto.vmi.vreg<128xui16>, !pto.vmi.vreg<128xui16>
+    %bits = pto.vmi.vor %low, %high : !pto.vmi.vreg<128xui16>, !pto.vmi.vreg<128xui16> -> !pto.vmi.vreg<128xui16>
+    %bf16 = pto.vmi.vinterpret_cast %bits : !pto.vmi.vreg<128xui16> -> !pto.vmi.vreg<128xbf16>
+    %pairs = pto.vmi.vinterpret_cast %bf16 : !pto.vmi.vreg<128xbf16> -> !pto.vmi.vreg<64x!pto.bf16x2>
+    %out = pto.vmi.vcvt %pairs {rounding = "R"} : !pto.vmi.vreg<64x!pto.bf16x2> -> !pto.vmi.vreg<64x!pto.f4E2M1x2>
+    pto.vmi.vstore %out, %dst[%c0] : !pto.vmi.vreg<64x!pto.f4E2M1x2>, !pto.ptr<!pto.f4E2M1x2, ub>
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @group_broadcast_packed_bitcast(
+// CHECK: pto.vlds
+// CHECK: pto.vselr
+// CHECK: pto.vmul
+// CHECK: pto.vbitcast {{.*}} -> !pto.vreg<128xbf16>
+// CHECK: pto.vbitcast {{.*}} -> !pto.vreg<64x!pto.bf16x2>
+// CHECK: pto.vcvt
+// CHECK-SAME: -> !pto.vreg<256x!pto.f4E2M1x2>
+// CHECK: pto.vsts
+// CHECK-SAME: dist = "PK4_B32"
+// CHECK: return

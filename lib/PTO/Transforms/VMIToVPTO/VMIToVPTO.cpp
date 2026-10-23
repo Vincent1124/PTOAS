@@ -57,6 +57,7 @@ namespace {
 #include "VMIToVPTOMemoryInternals.cpp"
 #include "VMIToVPTOMaskInternals.cpp"
 #include "VMIToVPTODataLayoutInternals.cpp"
+#include "VMIToVPTOMaskLayoutInternals.cpp"
 #include "VMIToVPTOUnifiedMaskInternals.cpp"
 #include "VMIToVPTOPatternInternals0.cpp"
 #include "VMIToVPTOPatternInternals1.cpp"

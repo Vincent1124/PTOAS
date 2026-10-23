@@ -9,13 +9,8 @@
 // RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o - | FileCheck %s --implicit-check-not=pto.vmi. --implicit-check-not='!pto.vmi.'
 // RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-mask-granularity-assignment -vmi-layout-assignment | FileCheck %s --check-prefix=LAYOUT
 
-// A short integer extension whose narrow side carries elementwise compute must
-// stay lowerable.  The narrow-side-compute gate only applies when the
-// lane-stride carrier really spans several physical parts; a single-part class
-// keeps its dense lane-stride relation and reaches the group store through the
-// existing contiguous -> group-slot bridge.  Gating it instead would force a
-// deinterleaved result that has no materialization to the group store, which is
-// the failure this case pins.
+// Short integer widening with narrow-side compute must remain lowerable.
+// Check the selected carrier layout and its connection to the group store.
 
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
   func.func @si16_extend_store_si32_mul_L2(%src: !pto.ptr<si16, ub>, %dst: !pto.ptr<si32, ub>, %off: index) attributes {pto.kernel} {
@@ -66,10 +61,53 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 // CHECK-LABEL: func.func @si16_extend_store_si32_mul_L8(
 // CHECK: pto.vsts
 
-// The assigned layouts: compute stays on the dense lane-stride carrier and the
-// extension hands off to the group store through a contiguous -> gs(8) bridge.
+// Check the assigned carrier and group-store layouts.
+
+// LAYOUT-LABEL: func.func @si16_extend_store_si32_mul_L2(
+// LAYOUT-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: !pto.ptr<si16, ub>,
+// LAYOUT-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: !pto.ptr<si32, ub>,
+// LAYOUT-SAME: %[[VAL_2:[a-zA-Z0-9_.$-]+]]: index) attributes {pto.kernel} {
+// LAYOUT-NEXT: %[[VAL_3:[a-zA-Z0-9_.$-]+]] = arith.constant 16 : index
+// LAYOUT-NEXT: %[[VAL_4:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_2]], %[[VAL_3]] : index
+// LAYOUT-NEXT: pto.vecscope {
+// LAYOUT-NEXT: %[[VAL_5:[a-zA-Z0-9_.$-]+]] = pto.vmi.load %[[VAL_0]]{{\[}}%[[VAL_4]]] : !pto.ptr<si16, ub> -> !pto.vmi.vreg<2xsi16, #pto.vmi.layout<contiguous>>
+// LAYOUT-NEXT: %[[VAL_6:[a-zA-Z0-9_.$-]+]] = pto.vmi.vmul %[[VAL_5]], %[[VAL_5]] : !pto.vmi.vreg<2xsi16, #pto.vmi.layout<contiguous>>, !pto.vmi.vreg<2xsi16, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<2xsi16, #pto.vmi.layout<contiguous>>
+// LAYOUT-NEXT: %[[VAL_7:[a-zA-Z0-9_.$-]+]] = pto.vmi.ensure_layout %[[VAL_6]] : !pto.vmi.vreg<2xsi16, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<2xsi16, #pto.vmi.layout<num_groups = 2, slots = 8, lane_stride = 2>>
+// LAYOUT-NEXT: %[[VAL_8:[a-zA-Z0-9_.$-]+]] = pto.vmi.extsi %[[VAL_7]] : !pto.vmi.vreg<2xsi16, #pto.vmi.layout<num_groups = 2, slots = 8, lane_stride = 2>> -> !pto.vmi.vreg<2xsi32, #pto.vmi.layout<num_groups = 2, slots = 8>>
+// LAYOUT-NEXT: %[[VAL_9:[a-zA-Z0-9_.$-]+]] = arith.constant 1 : index
+// LAYOUT-NEXT: pto.vmi.group_store %[[VAL_8]], %[[VAL_1]]{{\[}}%[[VAL_4]]], %[[VAL_9]] {num_groups = 2 : i64} : !pto.vmi.vreg<2xsi32, #pto.vmi.layout<num_groups = 2, slots = 8>>, !pto.ptr<si32, ub>
+// LAYOUT-NEXT: }
+// LAYOUT-NEXT: return
+// LAYOUT-NEXT: }
+// LAYOUT-LABEL: func.func @si16_extend_store_si32_mul_L4(
+// LAYOUT-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: !pto.ptr<si16, ub>,
+// LAYOUT-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: !pto.ptr<si32, ub>,
+// LAYOUT-SAME: %[[VAL_2:[a-zA-Z0-9_.$-]+]]: index) attributes {pto.kernel} {
+// LAYOUT-NEXT: %[[VAL_3:[a-zA-Z0-9_.$-]+]] = arith.constant 16 : index
+// LAYOUT-NEXT: %[[VAL_4:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_2]], %[[VAL_3]] : index
+// LAYOUT-NEXT: pto.vecscope {
+// LAYOUT-NEXT: %[[VAL_5:[a-zA-Z0-9_.$-]+]] = pto.vmi.load %[[VAL_0]]{{\[}}%[[VAL_4]]] : !pto.ptr<si16, ub> -> !pto.vmi.vreg<4xsi16, #pto.vmi.layout<contiguous>>
+// LAYOUT-NEXT: %[[VAL_6:[a-zA-Z0-9_.$-]+]] = pto.vmi.vmul %[[VAL_5]], %[[VAL_5]] : !pto.vmi.vreg<4xsi16, #pto.vmi.layout<contiguous>>, !pto.vmi.vreg<4xsi16, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<4xsi16, #pto.vmi.layout<contiguous>>
+// LAYOUT-NEXT: %[[VAL_7:[a-zA-Z0-9_.$-]+]] = pto.vmi.ensure_layout %[[VAL_6]] : !pto.vmi.vreg<4xsi16, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<4xsi16, #pto.vmi.layout<num_groups = 4, slots = 8, lane_stride = 2>>
+// LAYOUT-NEXT: %[[VAL_8:[a-zA-Z0-9_.$-]+]] = pto.vmi.extsi %[[VAL_7]] : !pto.vmi.vreg<4xsi16, #pto.vmi.layout<num_groups = 4, slots = 8, lane_stride = 2>> -> !pto.vmi.vreg<4xsi32, #pto.vmi.layout<num_groups = 4, slots = 8>>
+// LAYOUT-NEXT: %[[VAL_9:[a-zA-Z0-9_.$-]+]] = arith.constant 1 : index
+// LAYOUT-NEXT: pto.vmi.group_store %[[VAL_8]], %[[VAL_1]]{{\[}}%[[VAL_4]]], %[[VAL_9]] {num_groups = 4 : i64} : !pto.vmi.vreg<4xsi32, #pto.vmi.layout<num_groups = 4, slots = 8>>, !pto.ptr<si32, ub>
+// LAYOUT-NEXT: }
+// LAYOUT-NEXT: return
+// LAYOUT-NEXT: }
 // LAYOUT-LABEL: func.func @si16_extend_store_si32_mul_L8(
-// LAYOUT: pto.vmi.vmul {{.*}} -> !pto.vmi.vreg<8xsi16, #pto.vmi.layout<contiguous, lane_stride = 2>>
-// LAYOUT: pto.vmi.extsi {{.*}} : !pto.vmi.vreg<8xsi16, #pto.vmi.layout<contiguous, lane_stride = 2>> -> !pto.vmi.vreg<8xsi32, #pto.vmi.layout<contiguous>>
-// LAYOUT: pto.vmi.ensure_layout {{.*}} -> !pto.vmi.vreg<8xsi32, #pto.vmi.layout<num_groups = 8, slots = 8>>
-// LAYOUT: pto.vmi.group_store
+// LAYOUT-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: !pto.ptr<si16, ub>,
+// LAYOUT-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: !pto.ptr<si32, ub>,
+// LAYOUT-SAME: %[[VAL_2:[a-zA-Z0-9_.$-]+]]: index) attributes {pto.kernel} {
+// LAYOUT-NEXT: %[[VAL_3:[a-zA-Z0-9_.$-]+]] = arith.constant 16 : index
+// LAYOUT-NEXT: %[[VAL_4:[a-zA-Z0-9_.$-]+]] = arith.muli %[[VAL_2]], %[[VAL_3]] : index
+// LAYOUT-NEXT: pto.vecscope {
+// LAYOUT-NEXT: %[[VAL_5:[a-zA-Z0-9_.$-]+]] = pto.vmi.load %[[VAL_0]]{{\[}}%[[VAL_4]]] : !pto.ptr<si16, ub> -> !pto.vmi.vreg<8xsi16, #pto.vmi.layout<contiguous>>
+// LAYOUT-NEXT: %[[VAL_6:[a-zA-Z0-9_.$-]+]] = pto.vmi.vmul %[[VAL_5]], %[[VAL_5]] : !pto.vmi.vreg<8xsi16, #pto.vmi.layout<contiguous>>, !pto.vmi.vreg<8xsi16, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<8xsi16, #pto.vmi.layout<contiguous>>
+// LAYOUT-NEXT: %[[VAL_7:[a-zA-Z0-9_.$-]+]] = pto.vmi.ensure_layout %[[VAL_6]] : !pto.vmi.vreg<8xsi16, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<8xsi16, #pto.vmi.layout<num_groups = 8, slots = 8, lane_stride = 2>>
+// LAYOUT-NEXT: %[[VAL_8:[a-zA-Z0-9_.$-]+]] = pto.vmi.extsi %[[VAL_7]] : !pto.vmi.vreg<8xsi16, #pto.vmi.layout<num_groups = 8, slots = 8, lane_stride = 2>> -> !pto.vmi.vreg<8xsi32, #pto.vmi.layout<num_groups = 8, slots = 8>>
+// LAYOUT-NEXT: %[[VAL_9:[a-zA-Z0-9_.$-]+]] = arith.constant 1 : index
+// LAYOUT-NEXT: pto.vmi.group_store %[[VAL_8]], %[[VAL_1]]{{\[}}%[[VAL_4]]], %[[VAL_9]] {num_groups = 8 : i64} : !pto.vmi.vreg<8xsi32, #pto.vmi.layout<num_groups = 8, slots = 8>>, !pto.ptr<si32, ub>
+// LAYOUT-NEXT: }
+// LAYOUT-NEXT: return
+// LAYOUT-NEXT: }

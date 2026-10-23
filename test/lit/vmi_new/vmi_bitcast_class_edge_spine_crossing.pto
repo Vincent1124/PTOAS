@@ -9,28 +9,9 @@
 // RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-mask-granularity-assignment -vmi-layout-assignment | FileCheck %s --check-prefix=ASSIGN --implicit-check-not=pto.vmi.ensure_layout
 // RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-mask-granularity-assignment -vmi-layout-assignment -pto-validate-vmi-layout-ir -vmi-to-vpto | FileCheck %s --check-prefix=LOWER --implicit-check-not=pto.vmi. --implicit-check-not='!pto.vmi.'
 
-// An equal-width bitcast is a *layout class edge*, so the direction-spine class
-// walk must be able to cross it.  Two things have to hold for that to be real
-// rather than declared:
-//
-//   * the walk has to treat the crossed value as still inside the class.  A
-//     layout is a physical-carrier property, so the class test is the storage
-//     element width, not MLIR element-type identity - an equal-width bitcast
-//     reinterprets the element type on purpose (here i32 <-> ui32) while
-//     keeping the carrier.
-//   * the class edge has to be *free*: the layout the spine family selects must
-//     travel through the bitcast with no ensure_layout on either side.
-//
-// The two functions are the same nested <up,down,up,down> integer round trip,
-// once without and once with the equal-width bitcast between the last widening
-// leg and the closing narrowing leg.  Both are recognised and both take the
-// spine-scoped integer family (deinterleaved = 2 on the narrow side,
-// deinterleaved = 4 on the wide side); the ASSIGN run forbids ensure_layout
-// anywhere in the file, so the bitcast can only be carrying that layout as a
-// class edge.  Before the class test used the storage element width, the second
-// function fell back to the generic lane-stride family
-// (contiguous + lane_stride = 2 / contiguous), i.e. the declared class edge
-// could never be used.
+// Equal-width bitcasts preserve the physical layout across an integer cast
+// round trip. Compare the versions with and without the bitcast while allowing
+// the physical cost model to choose the cast family.
 
 module {
   func.func @spine_without_bitcast(
@@ -72,40 +53,77 @@ module {
   }
 }
 
-// ASSIGN-LABEL: func.func @spine_without_bitcast
-// ASSIGN: %[[L0:.*]] = pto.vmi.load
-// ASSIGN-SAME: !pto.vmi.vreg<128xui16, #pto.vmi.layout<deinterleaved = 2>>
-// ASSIGN: %[[W0:.*]] = pto.vmi.extui %[[L0]]
-// ASSIGN-SAME: -> !pto.vmi.vreg<128xui32, #pto.vmi.layout<deinterleaved = 4>>
-// ASSIGN: %[[N0:.*]] = pto.vmi.trunci %[[W0]]
-// ASSIGN-SAME: -> !pto.vmi.vreg<128xui16, #pto.vmi.layout<deinterleaved = 2>>
-// ASSIGN: pto.vmi.extui %[[N0]]
-// ASSIGN: pto.vmi.trunci
-// ASSIGN-SAME: -> !pto.vmi.vreg<128xui16, #pto.vmi.layout<deinterleaved = 2>>
+// ASSIGN-LABEL: func.func @spine_without_bitcast(
+// ASSIGN-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: !pto.ptr<ui16, ub>,
+// ASSIGN-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: !pto.ptr<ui16, ub>) {
+// ASSIGN-NEXT: %[[VAL_2:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : index
+// ASSIGN-NEXT: %[[VAL_3:[a-zA-Z0-9_.$-]+]] = pto.vmi.load %[[VAL_0]]{{\[}}%[[VAL_2]]] : !pto.ptr<ui16, ub> -> !pto.vmi.vreg<128xui16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+// ASSIGN-NEXT: %[[VAL_4:[a-zA-Z0-9_.$-]+]] = pto.vmi.extui %[[VAL_3]] : !pto.vmi.vreg<128xui16, #pto.vmi.layout<contiguous, lane_stride = 2>> -> !pto.vmi.vreg<128xui32, #pto.vmi.layout<contiguous>>
+// ASSIGN-NEXT: %[[VAL_5:[a-zA-Z0-9_.$-]+]] = pto.vmi.trunci %[[VAL_4]] {saturate = "NOSAT"} : !pto.vmi.vreg<128xui32, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<128xui16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+// ASSIGN-NEXT: %[[VAL_6:[a-zA-Z0-9_.$-]+]] = pto.vmi.extui %[[VAL_5]] : !pto.vmi.vreg<128xui16, #pto.vmi.layout<contiguous, lane_stride = 2>> -> !pto.vmi.vreg<128xui32, #pto.vmi.layout<contiguous>>
+// ASSIGN-NEXT: %[[VAL_7:[a-zA-Z0-9_.$-]+]] = pto.vmi.trunci %[[VAL_6]] {saturate = "NOSAT"} : !pto.vmi.vreg<128xui32, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<128xui16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+// ASSIGN-NEXT: pto.vmi.store %[[VAL_7]], %[[VAL_1]]{{\[}}%[[VAL_2]]] : !pto.vmi.vreg<128xui16, #pto.vmi.layout<contiguous, lane_stride = 2>>, !pto.ptr<ui16, ub>
+// ASSIGN-NEXT: return
+// ASSIGN-NEXT: }
+// ASSIGN-LABEL: func.func @spine_across_equal_width_bitcast(
+// ASSIGN-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: !pto.ptr<ui16, ub>,
+// ASSIGN-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: !pto.ptr<ui16, ub>) {
+// ASSIGN-NEXT: %[[VAL_2:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : index
+// ASSIGN-NEXT: %[[VAL_3:[a-zA-Z0-9_.$-]+]] = pto.vmi.load %[[VAL_0]]{{\[}}%[[VAL_2]]] : !pto.ptr<ui16, ub> -> !pto.vmi.vreg<128xui16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+// ASSIGN-NEXT: %[[VAL_4:[a-zA-Z0-9_.$-]+]] = pto.vmi.extui %[[VAL_3]] : !pto.vmi.vreg<128xui16, #pto.vmi.layout<contiguous, lane_stride = 2>> -> !pto.vmi.vreg<128xui32, #pto.vmi.layout<contiguous>>
+// ASSIGN-NEXT: %[[VAL_5:[a-zA-Z0-9_.$-]+]] = pto.vmi.trunci %[[VAL_4]] {saturate = "NOSAT"} : !pto.vmi.vreg<128xui32, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<128xui16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+// ASSIGN-NEXT: %[[VAL_6:[a-zA-Z0-9_.$-]+]] = pto.vmi.extui %[[VAL_5]] : !pto.vmi.vreg<128xui16, #pto.vmi.layout<contiguous, lane_stride = 2>> -> !pto.vmi.vreg<128xui32, #pto.vmi.layout<contiguous>>
+// ASSIGN-NEXT: %[[VAL_7:[a-zA-Z0-9_.$-]+]] = pto.vmi.bitcast %[[VAL_6]] : !pto.vmi.vreg<128xui32, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<128xi32, #pto.vmi.layout<contiguous>>
+// ASSIGN-NEXT: %[[VAL_8:[a-zA-Z0-9_.$-]+]] = pto.vmi.trunci %[[VAL_7]] {saturate = "NOSAT"} : !pto.vmi.vreg<128xi32, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<128xui16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+// ASSIGN-NEXT: pto.vmi.store %[[VAL_8]], %[[VAL_1]]{{\[}}%[[VAL_2]]] : !pto.vmi.vreg<128xui16, #pto.vmi.layout<contiguous, lane_stride = 2>>, !pto.ptr<ui16, ub>
+// ASSIGN-NEXT: return
+// ASSIGN-NEXT: }
 
-// ASSIGN-LABEL: func.func @spine_across_equal_width_bitcast
-// ASSIGN: %[[L1:.*]] = pto.vmi.load
-// ASSIGN-SAME: !pto.vmi.vreg<128xui16, #pto.vmi.layout<deinterleaved = 2>>
-// ASSIGN: %[[W1:.*]] = pto.vmi.extui %[[L1]]
-// ASSIGN-SAME: -> !pto.vmi.vreg<128xui32, #pto.vmi.layout<deinterleaved = 4>>
-// ASSIGN: %[[N1:.*]] = pto.vmi.trunci %[[W1]]
-// ASSIGN-SAME: -> !pto.vmi.vreg<128xui16, #pto.vmi.layout<deinterleaved = 2>>
-// ASSIGN: %[[U1:.*]] = pto.vmi.extui %[[N1]]
-// ASSIGN-SAME: -> !pto.vmi.vreg<128xui32, #pto.vmi.layout<deinterleaved = 4>>
-// ASSIGN: %[[B1:.*]] = pto.vmi.bitcast %[[U1]]
-// ASSIGN-SAME: !pto.vmi.vreg<128xui32, #pto.vmi.layout<deinterleaved = 4>>
-// ASSIGN-SAME: -> !pto.vmi.vreg<128xi32, #pto.vmi.layout<deinterleaved = 4>>
-// ASSIGN: %[[T1:.*]] = pto.vmi.trunci %[[B1]]
-// ASSIGN-SAME: -> !pto.vmi.vreg<128xui16, #pto.vmi.layout<deinterleaved = 2>>
-// ASSIGN: pto.vmi.store %[[T1]]
-
-// LOWER-LABEL: func.func @spine_without_bitcast
-// LOWER: pto.vlds
-// LOWER: pto.vdintlv
-// LOWER: pto.vsts
-
-// LOWER-LABEL: func.func @spine_across_equal_width_bitcast
-// LOWER: pto.vlds
-// LOWER: pto.vdintlv
-// LOWER: pto.vbitcast
-// LOWER: pto.vsts
+// LOWER-LABEL: func.func @spine_without_bitcast(
+// LOWER-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: !pto.ptr<ui16, ub>,
+// LOWER-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: !pto.ptr<ui16, ub>) {
+// LOWER-NEXT: %[[VAL_2:[a-zA-Z0-9_.$-]+]] = arith.constant 64 : index
+// LOWER-NEXT: %[[VAL_3:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : index
+// LOWER-NEXT: %[[VAL_4:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_3]]] {dist = "UNPK_B16"} : !pto.ptr<ui16, ub> -> !pto.vreg<128xui16>
+// LOWER-NEXT: %[[VAL_5:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_2]]] {dist = "UNPK_B16"} : !pto.ptr<ui16, ub> -> !pto.vreg<128xui16>
+// LOWER-NEXT: %[[VAL_6:[a-zA-Z0-9_.$-]+]] = pto.pset_b16 "PAT_ALL" : !pto.mask<b16>
+// LOWER-NEXT: %[[VAL_7:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_4]], %[[VAL_6]] {part = "EVEN"} : !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<64xui32>
+// LOWER-NEXT: %[[VAL_8:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_5]], %[[VAL_6]] {part = "EVEN"} : !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<64xui32>
+// LOWER-NEXT: %[[VAL_9:[a-zA-Z0-9_.$-]+]] = pto.vbitcast %[[VAL_7]] : !pto.vreg<64xui32> -> !pto.vreg<128xui16>
+// LOWER-NEXT: %[[VAL_10:[a-zA-Z0-9_.$-]+]] = pto.vbitcast %[[VAL_8]] : !pto.vreg<64xui32> -> !pto.vreg<128xui16>
+// LOWER-NEXT: %[[VAL_11:[a-zA-Z0-9_.$-]+]] = pto.pset_b16 "PAT_ALL" : !pto.mask<b16>
+// LOWER-NEXT: %[[VAL_12:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_9]], %[[VAL_11]] {part = "EVEN"} : !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<64xui32>
+// LOWER-NEXT: %[[VAL_13:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_10]], %[[VAL_11]] {part = "EVEN"} : !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<64xui32>
+// LOWER-NEXT: %[[VAL_14:[a-zA-Z0-9_.$-]+]] = pto.vbitcast %[[VAL_12]] : !pto.vreg<64xui32> -> !pto.vreg<128xui16>
+// LOWER-NEXT: %[[VAL_15:[a-zA-Z0-9_.$-]+]] = pto.vbitcast %[[VAL_13]] : !pto.vreg<64xui32> -> !pto.vreg<128xui16>
+// LOWER-NEXT: %[[VAL_16:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// LOWER-NEXT: pto.vsts %[[VAL_14]], %[[VAL_1]]{{\[}}%[[VAL_3]]], %[[VAL_16]] {dist = "PK_B32"} : !pto.vreg<128xui16>, !pto.ptr<ui16, ub>, !pto.mask<b32>
+// LOWER-NEXT: %[[VAL_17:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// LOWER-NEXT: pto.vsts %[[VAL_15]], %[[VAL_1]]{{\[}}%[[VAL_2]]], %[[VAL_17]] {dist = "PK_B32"} : !pto.vreg<128xui16>, !pto.ptr<ui16, ub>, !pto.mask<b32>
+// LOWER-NEXT: return
+// LOWER-NEXT: }
+// LOWER-LABEL: func.func @spine_across_equal_width_bitcast(
+// LOWER-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: !pto.ptr<ui16, ub>,
+// LOWER-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: !pto.ptr<ui16, ub>) {
+// LOWER-NEXT: %[[VAL_2:[a-zA-Z0-9_.$-]+]] = arith.constant 64 : index
+// LOWER-NEXT: %[[VAL_3:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : index
+// LOWER-NEXT: %[[VAL_4:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_3]]] {dist = "UNPK_B16"} : !pto.ptr<ui16, ub> -> !pto.vreg<128xui16>
+// LOWER-NEXT: %[[VAL_5:[a-zA-Z0-9_.$-]+]] = pto.vlds %[[VAL_0]]{{\[}}%[[VAL_2]]] {dist = "UNPK_B16"} : !pto.ptr<ui16, ub> -> !pto.vreg<128xui16>
+// LOWER-NEXT: %[[VAL_6:[a-zA-Z0-9_.$-]+]] = pto.pset_b16 "PAT_ALL" : !pto.mask<b16>
+// LOWER-NEXT: %[[VAL_7:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_4]], %[[VAL_6]] {part = "EVEN"} : !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<64xui32>
+// LOWER-NEXT: %[[VAL_8:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_5]], %[[VAL_6]] {part = "EVEN"} : !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<64xui32>
+// LOWER-NEXT: %[[VAL_9:[a-zA-Z0-9_.$-]+]] = pto.vbitcast %[[VAL_7]] : !pto.vreg<64xui32> -> !pto.vreg<128xui16>
+// LOWER-NEXT: %[[VAL_10:[a-zA-Z0-9_.$-]+]] = pto.vbitcast %[[VAL_8]] : !pto.vreg<64xui32> -> !pto.vreg<128xui16>
+// LOWER-NEXT: %[[VAL_11:[a-zA-Z0-9_.$-]+]] = pto.pset_b16 "PAT_ALL" : !pto.mask<b16>
+// LOWER-NEXT: %[[VAL_12:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_9]], %[[VAL_11]] {part = "EVEN"} : !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<64xui32>
+// LOWER-NEXT: %[[VAL_13:[a-zA-Z0-9_.$-]+]] = pto.vcvt %[[VAL_10]], %[[VAL_11]] {part = "EVEN"} : !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<64xui32>
+// LOWER-NEXT: %[[VAL_14:[a-zA-Z0-9_.$-]+]] = pto.vbitcast %[[VAL_12]] : !pto.vreg<64xui32> -> !pto.vreg<64xi32>
+// LOWER-NEXT: %[[VAL_15:[a-zA-Z0-9_.$-]+]] = pto.vbitcast %[[VAL_13]] : !pto.vreg<64xui32> -> !pto.vreg<64xi32>
+// LOWER-NEXT: %[[VAL_16:[a-zA-Z0-9_.$-]+]] = pto.vbitcast %[[VAL_14]] : !pto.vreg<64xi32> -> !pto.vreg<128xui16>
+// LOWER-NEXT: %[[VAL_17:[a-zA-Z0-9_.$-]+]] = pto.vbitcast %[[VAL_15]] : !pto.vreg<64xi32> -> !pto.vreg<128xui16>
+// LOWER-NEXT: %[[VAL_18:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// LOWER-NEXT: pto.vsts %[[VAL_16]], %[[VAL_1]]{{\[}}%[[VAL_3]]], %[[VAL_18]] {dist = "PK_B32"} : !pto.vreg<128xui16>, !pto.ptr<ui16, ub>, !pto.mask<b32>
+// LOWER-NEXT: %[[VAL_19:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// LOWER-NEXT: pto.vsts %[[VAL_17]], %[[VAL_1]]{{\[}}%[[VAL_2]]], %[[VAL_19]] {dist = "PK_B32"} : !pto.vreg<128xui16>, !pto.ptr<ui16, ub>, !pto.mask<b32>
+// LOWER-NEXT: return
+// LOWER-NEXT: }

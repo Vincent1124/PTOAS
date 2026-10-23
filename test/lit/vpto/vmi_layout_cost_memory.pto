@@ -1,0 +1,127 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt %s -vmi-layout-assignment | FileCheck %s --check-prefix=ASSIGN
+// RUN: pto-test-opt %s -vmi-layout-assignment -vmi-to-vpto -canonicalize -cse | FileCheck %s --check-prefix=LOWER
+
+// Memory actions break ties after arithmetic and shuffle work. The solver
+// chooses contiguous widening and lane-strided FP8 stores rather than packing
+// a dense FP8 result with three additional OR merges. Account for the BF16
+// conversion and its internal interleaves as physical work.
+// ASSIGN-LABEL: func.func @quant_chain(
+// ASSIGN: pto.vmi.vmul
+// ASSIGN-SAME: -> !pto.vmi.vreg<256xbf16, #pto.vmi.layout<deinterleaved = 2>>
+// ASSIGN-NEXT: {{.*}}pto.vmi.ensure_layout
+// ASSIGN-SAME: -> !pto.vmi.vreg<256xbf16, #pto.vmi.layout<contiguous>>
+// ASSIGN: pto.vmi.extf
+// ASSIGN-SAME: !pto.vmi.vreg<256xbf16, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<256xf32, #pto.vmi.layout<contiguous>>
+// ASSIGN-NEXT: {{.*}}pto.vmi.truncf
+// ASSIGN-SAME: -> !pto.vmi.vreg<256xf8E4M3FN, #pto.vmi.layout<contiguous, lane_stride = 4>>
+// ASSIGN-NOT: ensure_layout
+// ASSIGN: pto.vmi.store
+// LOWER-LABEL: func.func @quant_chain(
+// LOWER: pto.vlds {{.*}}dist = "E2B_B16"
+// LOWER: pto.vldsx2 {{.*}}"DINTLV_B16"
+// LOWER-COUNT-2: pto.vmul
+// LOWER-COUNT-3: pto.vintlv
+// LOWER-NOT: pto.vintlv
+// LOWER-COUNT-4: pto.vcvt {{.*}}part = "P0"
+// LOWER-NOT: pto.vcvt
+// LOWER-NOT: pto.vor
+// LOWER-COUNT-4: pto.vsts {{.*}}dist = "PK4_B32"
+// LOWER-NOT: pto.vsts
+// LOWER: return
+
+// Independent row results execute no implicit result-packing tree. Fewer
+// stores must not outweigh the shuffles needed to form a native group packet.
+// ASSIGN-LABEL: func.func @row_results(
+// ASSIGN: pto.vmi.group_reduce_maxf
+// ASSIGN-SAME: !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>>
+// ASSIGN-SAME: -> !pto.vmi.vreg<4xf32, #pto.vmi.layout<num_groups = 4, slots = 1>>
+// LOWER-LABEL: func.func @row_results(
+// LOWER-NOT: pto.vdintlv
+// LOWER-COUNT-4: pto.vcmax
+// LOWER-NOT: pto.vdintlv
+// LOWER-COUNT-4: pto.vsts
+// LOWER-NOT: pto.vsts
+// LOWER: return
+
+// Native grouped integer reduction must include its arithmetic advantage over
+// eight independent row reductions. The following widening executes
+// once per result carrier, so choosing rows replicates the downstream work.
+// ASSIGN-LABEL: func.func @integer_group_results(
+// ASSIGN: pto.vmi.group_reduce_maxi
+// ASSIGN-SAME: !pto.vmi.vreg<256xui16, #pto.vmi.layout<deinterleaved = 2>>
+// ASSIGN-SAME: -> !pto.vmi.vreg<8xui16, #pto.vmi.layout<num_groups = 8, slots = 8>>
+// LOWER-LABEL: func.func @integer_group_results(
+// LOWER-NOT: pto.vcmax
+// LOWER-COUNT-2: pto.vcgmax
+// LOWER: pto.vzunpack
+// LOWER: pto.vsts
+// LOWER-NOT: pto.vsts
+// LOWER: return
+
+// A short integer tail still shares one widened result packet. Four scalar
+// rows must pay four conversions rather than treating extui as a free alias.
+// ASSIGN-LABEL: func.func @integer_tail_results(
+// ASSIGN: pto.vmi.group_reduce_maxi
+// ASSIGN-SAME: -> !pto.vmi.vreg<4xui16, #pto.vmi.layout<num_groups = 4, slots = 8>>
+// LOWER-LABEL: func.func @integer_tail_results(
+// LOWER-NOT: pto.vcmax
+// LOWER-COUNT-2: pto.vcgmax
+// LOWER: pto.vzunpack
+// LOWER: pto.vsts
+// LOWER-NOT: pto.vsts
+// LOWER: return
+
+module {
+ func.func @quant_chain(%src: !pto.ptr<bf16, ub>, %scale: !pto.ptr<bf16, ub>, %out: !pto.ptr<f8E4M3FN, ub>) {
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %s = pto.vmi.group_broadcast_load %scale[%c0], %c1 {num_groups = 8 : i64} : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<256xbf16>
+  %x = pto.vmi.load %src[%c0] : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<256xbf16>
+  %q = pto.vmi.vmul %x, %s : !pto.vmi.vreg<256xbf16>, !pto.vmi.vreg<256xbf16> -> !pto.vmi.vreg<256xbf16>
+  %f = pto.vmi.extf %q : !pto.vmi.vreg<256xbf16> -> !pto.vmi.vreg<256xf32>
+  %y = pto.vmi.truncf %f {rounding = "R", saturate = "SAT"} : !pto.vmi.vreg<256xf32> -> !pto.vmi.vreg<256xf8E4M3FN>
+  pto.vmi.store %y, %out[%c0] : !pto.vmi.vreg<256xf8E4M3FN>, !pto.ptr<f8E4M3FN, ub>
+  return
+ }
+ func.func @row_results(%src: !pto.ptr<f32, ub>, %out: !pto.ptr<f32, ub>) {
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %count = arith.constant 128 : index
+  %x = pto.vmi.load %src[%c0] : !pto.ptr<f32, ub> -> !pto.vmi.vreg<128xf32>
+  %m = pto.vmi.create_mask %count : index -> !pto.vmi.mask<128xb32>
+  %z = pto.vmi.vabs %x, %m : !pto.vmi.vreg<128xf32>, !pto.vmi.mask<128xb32> -> !pto.vmi.vreg<128xf32>
+  %r = pto.vmi.group_reduce_maxf %z, %m {num_groups = 4 : i64} : !pto.vmi.vreg<128xf32>, !pto.vmi.mask<128xb32> -> !pto.vmi.vreg<4xf32>
+  pto.vmi.group_store %r, %out[%c0], %c1 {num_groups = 4 : i64} : !pto.vmi.vreg<4xf32>, !pto.ptr<f32, ub>
+  return
+ }
+ func.func @integer_group_results(%src: !pto.ptr<ui16, ub>, %out: !pto.ptr<ui32, ub>) {
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %count = arith.constant 256 : index
+  %x = pto.vmi.load %src[%c0] : !pto.ptr<ui16, ub> -> !pto.vmi.vreg<256xui16>
+  %m = pto.vmi.create_mask %count : index -> !pto.vmi.mask<256xb16>
+  %r = pto.vmi.group_reduce_maxi %x, %m {num_groups = 8 : i64} : !pto.vmi.vreg<256xui16>, !pto.vmi.mask<256xb16> -> !pto.vmi.vreg<8xui16>
+  %w = pto.vmi.extui %r : !pto.vmi.vreg<8xui16> -> !pto.vmi.vreg<8xui32>
+  pto.vmi.group_store %w, %out[%c0], %c1 {num_groups = 8 : i64} : !pto.vmi.vreg<8xui32>, !pto.ptr<ui32, ub>
+  return
+ }
+ func.func @integer_tail_results(%src: !pto.ptr<ui16, ub>, %out: !pto.ptr<ui32, ub>) {
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %count = arith.constant 128 : index
+  %x = pto.vmi.load %src[%c0] : !pto.ptr<ui16, ub> -> !pto.vmi.vreg<128xui16>
+  %m = pto.vmi.create_mask %count : index -> !pto.vmi.mask<128xb16>
+  %r = pto.vmi.group_reduce_maxi %x, %m {num_groups = 4 : i64} : !pto.vmi.vreg<128xui16>, !pto.vmi.mask<128xb16> -> !pto.vmi.vreg<4xui16>
+  %w = pto.vmi.extui %r : !pto.vmi.vreg<4xui16> -> !pto.vmi.vreg<4xui32>
+  pto.vmi.group_store %w, %out[%c0], %c1 {num_groups = 4 : i64} : !pto.vmi.vreg<4xui32>, !pto.ptr<ui32, ub>
+  return
+ }
+}

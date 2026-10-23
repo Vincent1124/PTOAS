@@ -34,6 +34,40 @@ inline constexpr StringLiteral kVMIDiagPassInvariantPrefix =
     "VMI-PASS-INVARIANT: ";
 inline constexpr StringLiteral kVMIDiagResidualOpPrefix = "VMI-RESIDUAL-OP: ";
 
+/// Layout explicitly attached to a VMI data or predicate type.
+inline VMILayoutAttr getVMIExplicitLayout(Type type)
+{
+    if (auto vreg = dyn_cast<VMIVRegType>(type)) {
+        return vreg.getLayoutAttr();
+    }
+    if (auto mask = dyn_cast<VMIMaskType>(type)) {
+        return mask.getLayoutAttr();
+    }
+    return {};
+}
+
+/// A predicate carrier retains lane order and drops the logical lane stride.
+inline VMILayoutAttr getVMIMaskCarrierLayout(VMILayoutAttr layout)
+{
+    if (!layout) {
+        return {};
+    }
+    MLIRContext* ctx = layout.getContext();
+    if (layout.isContiguous()) {
+        return VMILayoutAttr::getContiguous(ctx);
+    }
+    if (layout.isDeinterleaved()) {
+        return VMILayoutAttr::getDeinterleaved(ctx, layout.getFactor());
+    }
+    if (layout.isBlockDeinterleaved()) {
+        return VMILayoutAttr::getBlockDeinterleaved(ctx, layout.getFactor());
+    }
+    if (layout.isGroupSlots()) {
+        return VMILayoutAttr::getGroupSlots(ctx, layout.getNumGroups(), layout.getSlots());
+    }
+    return {};
+}
+
 struct VMIPhysicalLane {
   int64_t part = 0;
   int64_t chunk = 0;

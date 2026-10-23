@@ -24,25 +24,23 @@ namespace mlir {
 
 namespace pto {
 
-/// Shared SCF loop-carried value constraints used by data-layout and mask-
-/// granularity assignment.  The callback owns the domain-specific union/find
-/// operation; this component only describes the SSA relationships of SCF
-/// loops.
+/// Shared control-flow value relationships. The callback owns the domain-
+/// specific constraint; this component does not choose layouts. Consumers must
+/// collect these relationships before partitioning values for independent
+/// analysis or solving.
 class VMIControlFlowSupport {
 public:
-  using EquivalenceCallback =
-      llvm::function_ref<LogicalResult(Value, Value, Operation *)>;
+    using EquivalenceCallback = llvm::function_ref<LogicalResult(Value, Value, Operation*)>;
 
-  static LogicalResult addForConstraints(scf::ForOp forOp,
-                                         EquivalenceCallback addEquivalent);
-  static LogicalResult addWhileConstraints(
-      scf::WhileOp whileOp, EquivalenceCallback addEquivalent);
+    static LogicalResult addConstraints(Operation* op, EquivalenceCallback addEquivalent);
+
+    static LogicalResult addForConstraints(scf::ForOp forOp, EquivalenceCallback addEquivalent);
+    static LogicalResult addWhileConstraints(scf::WhileOp whileOp, EquivalenceCallback addEquivalent);
 };
 
 /// Return the result types agreed on by every call to \p func. A null type
 /// marks a result position whose callers currently disagree.
-SmallVector<Type> getConsistentCallResultTypes(ModuleOp module,
-                                               func::FuncOp func);
+SmallVector<Type> getConsistentCallResultTypes(ModuleOp module, func::FuncOp func);
 
 /// Collect the current argument types used to rebuild a function signature.
 SmallVector<Type> getFunctionInputTypes(func::FuncOp func);

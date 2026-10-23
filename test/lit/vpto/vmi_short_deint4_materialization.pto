@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt %s -vmi-to-vpto='load-safety=error' | FileCheck %s --implicit-check-not=pto.vmi. --implicit-check-not='!pto.vmi.' --implicit-check-not=unrealized_conversion_cast
+
+// The four phases of 128 f32 lanes occupy four carriers, although the
+// contiguous memory footprint is only two. Padding comes from registers.
+module {
+  func.func @load_short_deint4(%src: !pto.ptr<f32, ub>)
+      -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 4>> {
+    %c0 = arith.constant 0 : index
+    %v = pto.vmi.load %src[%c0]
+        : !pto.ptr<f32, ub> -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 4>>
+    return %v : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 4>>
+  }
+  func.func @dense_to_short_deint4(%v: !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>>)
+      -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 4>> {
+    %r = pto.vmi.ensure_layout %v
+        : !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>>
+        -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 4>>
+    return %r : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 4>>
+  }
+  func.func @short_deint4_to_dense(%v: !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 4>>)
+      -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>> {
+    %r = pto.vmi.ensure_layout %v
+        : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 4>>
+        -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>>
+    return %r : !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>>
+  }
+}
+// CHECK-LABEL: func.func @load_short_deint4(
+// CHECK: %[[LOAD0:.*]] = pto.vlds %arg0[%c0]
+// CHECK: %[[LOAD1:.*]] = pto.vlds %arg0[%c64]
+// CHECK-NOT: pto.vlds
+// CHECK-NOT: pto.vldsx2
+// CHECK: %[[ZERO:.*]] = pto.vdup
+// CHECK: %[[EVEN:.*]], %[[ODD:.*]] = pto.vdintlv %[[LOAD0]], %[[LOAD1]]
+// CHECK: %[[Z0:.*]], %[[Z1:.*]] = pto.vdintlv %[[ZERO]], %[[ZERO]]
+// CHECK: %[[P0:.*]], %[[P2:.*]] = pto.vdintlv %[[EVEN]], %[[Z0]]
+// CHECK: %[[P1:.*]], %[[P3:.*]] = pto.vdintlv %[[ODD]], %[[Z1]]
+// CHECK: return %[[P0]], %[[P1]], %[[P2]], %[[P3]]
+// CHECK-LABEL: func.func @dense_to_short_deint4(
+// CHECK: %[[ZERO:.*]] = pto.vdup
+// CHECK: %[[EVEN:.*]], %[[ODD:.*]] = pto.vdintlv %arg0, %arg1
+// CHECK: %[[Z0:.*]], %[[Z1:.*]] = pto.vdintlv %[[ZERO]], %[[ZERO]]
+// CHECK: %[[P0:.*]], %[[P2:.*]] = pto.vdintlv %[[EVEN]], %[[Z0]]
+// CHECK: %[[P1:.*]], %[[P3:.*]] = pto.vdintlv %[[ODD]], %[[Z1]]
+// CHECK: return %[[P0]], %[[P1]], %[[P2]], %[[P3]]
+// CHECK-LABEL: func.func @short_deint4_to_dense(
+// CHECK: %[[EVEN:.*]], {{.*}} = pto.vintlv %arg0, %arg2
+// CHECK: %[[ODD:.*]], {{.*}} = pto.vintlv %arg1, %arg3
+// CHECK: %[[D0:.*]], %[[D1:.*]] = pto.vintlv %[[EVEN]], %[[ODD]]
+// CHECK: return %[[D0]], %[[D1]]

@@ -1037,6 +1037,51 @@ struct VMILowerUnifiedToLegacyPass
 
 } // namespace
 
+/// A lowering rewrite must not silently drop the operation it replaces: the
+/// dialect-prefixed (discardable) attributes of the source operation describe
+/// the source, not the legacy op that takes its place, so they are forwarded
+/// onto the replacement.  Only dialect-prefixed names are copied -- an inherent
+/// attribute such as `pmode` belongs to the op it is defined on and copying it
+/// onto a different legacy op could make that op invalid.
+///
+/// The rewrite builds the replacement immediately before `op`, so the last
+/// operation inserted between the source's two neighbours is the replacement.
+/// The destructor runs on every exit path of the per-op body, including the
+/// `continue` taken by each lowering branch.
+struct DiscardableAttributeForwarder {
+    Block* block;
+    Operation* before;
+    Operation* after;
+    SmallVector<NamedAttribute, 4> attributes;
+
+    ~DiscardableAttributeForwarder()
+    {
+        if (attributes.empty()) {
+            return;
+        }
+        Operation* replacement = after ? after->getPrevNode() : (block->empty() ? nullptr : &block->back());
+        // Nothing was inserted for this op, so there is no replacement to carry the
+        // attributes.
+        if (!replacement || replacement == before) {
+            return;
+        }
+        for (NamedAttribute attribute : attributes) {
+            replacement->setAttr(attribute.getName(), attribute.getValue());
+        }
+    }
+};
+
+static SmallVector<NamedAttribute, 4> getDiscardableAttributes(Operation* op)
+{
+    SmallVector<NamedAttribute, 4> attributes;
+    for (NamedAttribute attribute : op->getAttrs()) {
+        if (attribute.getName().getValue().contains('.')) {
+            attributes.push_back(attribute);
+        }
+    }
+    return attributes;
+}
+
 void VMILowerUnifiedToLegacyPass::runOnOperation() {
   ModuleOp module = getOperation();
   combineInterleavedMemoryOps(module);
@@ -1085,6 +1130,8 @@ void VMILowerUnifiedToLegacyPass::runOnOperation() {
     if (!op->getBlock()) {
       continue;
     }
+    DiscardableAttributeForwarder forwarder{
+        op->getBlock(), op->getPrevNode(), op->getNextNode(), getDiscardableAttributes(op)};
     OpBuilder builder(op);
 
     // ---- Category A: pure syntactic renames ----

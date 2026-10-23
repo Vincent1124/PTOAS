@@ -97,37 +97,35 @@ inline void appendMaterializableGroupStoreFacts(
   }
 }
 
-inline std::optional<VMIGroupStoreLayoutFact>
-getPreferredGroupSlotStoreFact(const VMILayoutSupport &support,
-                               VMIGroupStoreOp op, VMIVRegType valueType,
-                               int64_t numGroups) {
-  bool hasOneLanePerGroup = valueType.getElementCount() == numGroups;
-  if (!hasOneLanePerGroup) {
-    return std::nullopt;
-  }
-  std::optional<int64_t> rowStride = getConstantIndexValue(op.getRowStride());
-  // A unit row stride writes the group values back to back, which is what a
-  // dense short vector already holds in one carrier, so prefer the packed slot
-  // form for it.  One carrier per group stays as the fallback: a group reduce
-  // over whole parts really does produce one part per group, and only the
-  // slots = 1 group_store lowering can pack that back together.
-  SmallVector<int64_t, mlir::pto::kValue2> slotCandidates;
-  if (rowStride && *rowStride == 1) {
-    slotCandidates.push_back(mlir::pto::kValue8);
-  }
-  slotCandidates.push_back(1);
-  for (int64_t slots : slotCandidates) {
-    VMILayoutAttr layout = VMILayoutAttr::getGroupSlots(
-        valueType.getContext(), numGroups, slots);
-    auto assignedType = VMIVRegType::get(
-        valueType.getContext(), valueType.getElementCount(),
-        valueType.getElementType(), layout);
-    if (succeeded(support.getGroupStoreLayoutFact(op, assignedType,
-                                                  nullptr))) {
-      return VMIGroupStoreLayoutFact{layout};
+inline std::optional<VMIGroupStoreLayoutFact> getPreferredGroupSlotStoreFact(
+    const VMILayoutSupport& support, VMIGroupStoreOp op, VMIVRegType valueType, int64_t numGroups)
+{
+    bool hasOneLanePerGroup = valueType.getElementCount() == numGroups;
+    if (!hasOneLanePerGroup) {
+        return std::nullopt;
     }
-  }
-  return std::nullopt;
+    std::optional<int64_t> rowStride = getConstantIndexValue(op.getRowStride());
+    // A unit row stride writes the group values back to back, which is what a
+    // dense short vector already holds in one carrier, so prefer the packed slot
+    // form for it.  One carrier per group stays as the fallback: a group reduce
+    // over whole parts really does produce one part per group, and only the
+    // slots = 1 group_store lowering can pack that back together.
+    SmallVector<int64_t, mlir::pto::kValue2> slotCandidates;
+    if (rowStride && *rowStride == 1) {
+        slotCandidates.push_back(mlir::pto::kValue8);
+    }
+    slotCandidates.push_back(1);
+    for (int64_t slots : slotCandidates) {
+        VMILayoutAttr layout = VMILayoutAttr::getGroupSlots(valueType.getContext(), numGroups, slots);
+        auto assignedType =
+            VMIVRegType::get(valueType.getContext(), valueType.getElementCount(), valueType.getElementType(), layout);
+        if (succeeded(support.getGroupStoreLayoutFact(op, assignedType, nullptr))) {
+            VMIGroupStoreLayoutFact fact;
+            fact.valueLayout = layout;
+            return fact;
+        }
+    }
+    return std::nullopt;
 }
 
 inline const GroupStoreLayoutPattern *selectPreferredGroupStorePattern(

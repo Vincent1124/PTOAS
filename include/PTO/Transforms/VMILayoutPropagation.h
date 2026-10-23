@@ -85,6 +85,22 @@ public:
 
   bool canUseOperandLayout(OpOperand &operand, VMILayoutAttr layout) const;
   VMILayoutAttr getRequestedLayout(Value value) const;
+  // Layout the planner asked for on one specific operand: a use conflict
+  // recorded against that operand answers ahead of the value's assignment.
+  VMILayoutAttr getRequestedLayout(OpOperand &operand) const;
+
+  // Install a single planned assignment without running the propagator.  The
+  // costed planner decides every layout up front and commits the plan through
+  // these entry points; unlike request() they never enqueue work, so nothing is
+  // propagated behind the planner's back.
+  LogicalResult installPlanned(Value value, VMILayoutAttr layout);
+  LogicalResult installPlanned(OpOperand &operand, VMILayoutAttr layout);
+
+  // Ends the exact-request phase.  The planner calls this once after committing
+  // a plan; this port carries no exact-request mode, because the fork's
+  // requestExact overloads have no callers, so it is deliberately a no-op and
+  // exists only to keep the planner's commit sequence unchanged.
+  void endExactRequests();
   VMILayoutAttr getRequestedOrCurrentLayout(Value value) const;
   const VMIValueLayoutAssignment *lookup(Value value) const;
 

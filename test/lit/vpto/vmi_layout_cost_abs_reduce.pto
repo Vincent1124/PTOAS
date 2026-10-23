@@ -1,0 +1,72 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-mask-granularity-assignment -vmi-layout-assignment | FileCheck %s --check-prefix=ASSIGN --implicit-check-not=pto.vmi.ensure_layout
+// RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-mask-granularity-assignment -vmi-layout-assignment -vmi-to-vpto | FileCheck %s --check-prefix=LOWER --implicit-check-not=pto.vmi.
+
+// A short d4 value uses four carriers for 128xf32, while contiguous uses two.
+// Saving one shuffle must not hide the replicated abs and reduction work.
+// Contiguous also avoids the intrinsic widening/repacking work at 256xf32;
+// memory action counts are a tie-break after arithmetic and shuffles.
+module {
+  func.func @bf16_abs_reduce_128(%src: !pto.ptr<bf16, ub>, %out: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %count = arith.constant 128 : index
+    %x = pto.vmi.vload %src[%c0] : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<128xbf16>
+    %y = pto.vmi.vcvt %x : !pto.vmi.vreg<128xbf16> -> !pto.vmi.vreg<128xf32>
+    %m = pto.vmi.create_mask %count : index -> !pto.vmi.mask<128xpred>
+    %z = pto.vmi.vabs %y, %m : !pto.vmi.vreg<128xf32>, !pto.vmi.mask<128xpred> -> !pto.vmi.vreg<128xf32>
+    %r = pto.vmi.group_reduce_maxf %z, %m {num_groups = 4 : i64} : !pto.vmi.vreg<128xf32>, !pto.vmi.mask<128xpred> -> !pto.vmi.vreg<4xf32>
+    pto.vmi.group_store %r, %out[%c0], %c1 {num_groups = 4 : i64} : !pto.vmi.vreg<4xf32>, !pto.ptr<f32, ub>
+    return
+  }
+  func.func @bf16_abs_reduce_256(%src: !pto.ptr<bf16, ub>, %out: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %count = arith.constant 256 : index
+    %x = pto.vmi.vload %src[%c0] : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<256xbf16>
+    %y = pto.vmi.vcvt %x : !pto.vmi.vreg<256xbf16> -> !pto.vmi.vreg<256xf32>
+    %m = pto.vmi.create_mask %count : index -> !pto.vmi.mask<256xpred>
+    %z = pto.vmi.vabs %y, %m : !pto.vmi.vreg<256xf32>, !pto.vmi.mask<256xpred> -> !pto.vmi.vreg<256xf32>
+    %r = pto.vmi.group_reduce_maxf %z, %m {num_groups = 8 : i64} : !pto.vmi.vreg<256xf32>, !pto.vmi.mask<256xpred> -> !pto.vmi.vreg<8xf32>
+    pto.vmi.group_store %r, %out[%c0], %c1 {num_groups = 8 : i64} : !pto.vmi.vreg<8xf32>, !pto.ptr<f32, ub>
+    return
+  }
+}
+// ASSIGN-LABEL: func.func @bf16_abs_reduce_128(
+// ASSIGN: pto.vmi.load
+// ASSIGN-SAME: -> !pto.vmi.vreg<128xbf16, #pto.vmi.layout<contiguous>>
+// ASSIGN: pto.vmi.extf
+// ASSIGN-SAME: -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>>
+// ASSIGN: pto.vmi.vabs
+// ASSIGN-SAME: -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>>
+// ASSIGN: pto.vmi.group_reduce_maxf
+// ASSIGN-SAME: -> !pto.vmi.vreg<4xf32, #pto.vmi.layout<num_groups = 4, slots = 1>>
+// LOWER-LABEL: func.func @bf16_abs_reduce_128(
+// LOWER-COUNT-2: pto.vabs
+// LOWER-NOT: pto.vabs
+// LOWER-COUNT-4: pto.vcmax
+// LOWER-NOT: pto.vcmax
+// LOWER-COUNT-4: pto.vsts
+// LOWER-NOT: pto.vsts
+// LOWER: return
+// ASSIGN-LABEL: func.func @bf16_abs_reduce_256(
+// ASSIGN: pto.vmi.extf
+// ASSIGN-SAME: -> !pto.vmi.vreg<256xf32, #pto.vmi.layout<contiguous>>
+// ASSIGN: pto.vmi.group_reduce_maxf
+// ASSIGN-SAME: -> !pto.vmi.vreg<8xf32, #pto.vmi.layout<num_groups = 8, slots = 1>>
+// LOWER-LABEL: func.func @bf16_abs_reduce_256(
+// LOWER-COUNT-4: pto.vabs
+// LOWER-NOT: pto.vabs
+// LOWER-NOT: pto.vcgmax
+// LOWER-COUNT-8: pto.vcmax
+// LOWER-NOT: pto.vcmax
+// LOWER-COUNT-8: pto.vsts
+// LOWER-NOT: pto.vsts
+// LOWER: return

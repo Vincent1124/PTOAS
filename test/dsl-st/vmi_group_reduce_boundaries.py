@@ -22,9 +22,12 @@ OUTPUT_INDEX = 2
 
 def build_kernel(dtype, lanes, groups, itemsize, name):
     section = SECTION_BYTES // itemsize
+    # Only these graphs exceed the compiler's default frontier of 288.
+    ptoas_flags = (("--vmi-layout-max-frontier-entries=512",)
+                  if dtype == pto.i16 and (lanes, groups) in ((8, 1), (128, 4)) else ())
 
     @pto.jit(name=name, target="a5", backend="vpto", mode="explicit",
-             kernel_kind="vector", insert_sync=False)
+             kernel_kind="vector", insert_sync=False, ptoas_flags=ptoas_flags)
     def kernel(src: pto.ptr(dtype, "gm"), gates: pto.ptr(dtype, "gm"),
                out: pto.ptr(dtype, "gm"), active: pto.i32):
         src_ub = pto.castptr(pto.i64(0), pto.ptr(dtype, "ub"))

@@ -50,27 +50,8 @@ module {
   }
 }
 
-// ASSIGN-LABEL: func.func @bf16_f32_dense_cast_preference(
-// ASSIGN: %[[NARROW64:[^ ]+]] = pto.vmi.truncf %{{[^ ]+}}
-// ASSIGN-SAME: : !pto.vmi.vreg<64xf32, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<64xbf16, #pto.vmi.layout<contiguous>>
-// ASSIGN: %[[WIDE64:[^ ]+]] = pto.vmi.extf %{{[^ ]+}}
-// ASSIGN-SAME: : !pto.vmi.vreg<64xbf16, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<64xf32, #pto.vmi.layout<contiguous>>
-// ASSIGN: %[[NARROW128:[^ ]+]] = pto.vmi.truncf %{{[^ ]+}}
-// ASSIGN-SAME: : !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<128xbf16, #pto.vmi.layout<contiguous>>
-// ASSIGN: %[[WIDE128:[^ ]+]] = pto.vmi.extf %{{[^ ]+}}
-// ASSIGN-SAME: : !pto.vmi.vreg<128xbf16, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>>
-// ASSIGN: %[[NARROW256:[^ ]+]] = pto.vmi.truncf %{{[^ ]+}}
-// ASSIGN-SAME: : !pto.vmi.vreg<256xf32, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<256xbf16, #pto.vmi.layout<contiguous>>
-// ASSIGN: %[[WIDE256:[^ ]+]] = pto.vmi.extf %{{[^ ]+}}
-// ASSIGN-SAME: : !pto.vmi.vreg<256xbf16, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<256xf32, #pto.vmi.layout<contiguous>>
-
-// ASSIGN-LABEL: func.func @bf16_f32_group_slot_cast_preference(
-// ASSIGN: %[[SUM:[^ ]+]] = pto.vmi.group_reduce_addf
-// ASSIGN-SAME: -> !pto.vmi.vreg<8xf32, #pto.vmi.layout<num_groups = 8, slots = 8>>
-// ASSIGN: %[[NARROW_GS:[^ ]+]] = pto.vmi.truncf %[[SUM]]
-// ASSIGN-SAME: -> !pto.vmi.vreg<8xbf16, #pto.vmi.layout<num_groups = 8, slots = 8>>
-// ASSIGN: %[[WIDE_GS:[^ ]+]] = pto.vmi.extf %[[NARROW_GS]]
-// ASSIGN-SAME: -> !pto.vmi.vreg<8xf32, #pto.vmi.layout<num_groups = 8, slots = 8>>
+// Dense arguments cannot absorb lane stride in a load. The native d2 cast
+// avoids the internal interleave of same-layout BF16 widening.
 
 // STRICT-LABEL: func.func @bf16_f32_group_slot_cast_preference(
 // STRICT: pto.vcvt
@@ -78,3 +59,35 @@ module {
 // FAST-LABEL: func.func @bf16_f32_group_slot_cast_preference(
 // FAST: pto.vdintlv
 // FAST: pto.vintlv
+
+// ASSIGN-LABEL: func.func @bf16_f32_dense_cast_preference(
+// ASSIGN-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: !pto.vmi.vreg<64xf32, #pto.vmi.layout<contiguous>>,
+// ASSIGN-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: !pto.vmi.vreg<64xbf16, #pto.vmi.layout<contiguous>>,
+// ASSIGN-SAME: %[[VAL_2:[a-zA-Z0-9_.$-]+]]: !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>>,
+// ASSIGN-SAME: %[[VAL_3:[a-zA-Z0-9_.$-]+]]: !pto.vmi.vreg<128xbf16, #pto.vmi.layout<contiguous>>,
+// ASSIGN-SAME: %[[VAL_4:[a-zA-Z0-9_.$-]+]]: !pto.vmi.vreg<256xf32, #pto.vmi.layout<contiguous>>,
+// ASSIGN-SAME: %[[VAL_5:[a-zA-Z0-9_.$-]+]]: !pto.vmi.vreg<256xbf16, #pto.vmi.layout<contiguous>>) {
+// ASSIGN-NEXT: %[[VAL_6:[a-zA-Z0-9_.$-]+]] = pto.vmi.truncf %[[VAL_0]] {rounding = "Z", saturate = "NOSAT"} : !pto.vmi.vreg<64xf32, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<64xbf16, #pto.vmi.layout<contiguous>>
+// ASSIGN-NEXT: %[[VAL_7:[a-zA-Z0-9_.$-]+]] = pto.vmi.extf %[[VAL_1]] : !pto.vmi.vreg<64xbf16, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<64xf32, #pto.vmi.layout<contiguous>>
+// ASSIGN-NEXT: %[[VAL_8:[a-zA-Z0-9_.$-]+]] = pto.vmi.truncf %[[VAL_2]] {rounding = "Z", saturate = "NOSAT"} : !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<128xbf16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+// ASSIGN-NEXT: %[[VAL_9:[a-zA-Z0-9_.$-]+]] = pto.vmi.extf %[[VAL_3]] : !pto.vmi.vreg<128xbf16, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>>
+// ASSIGN-NEXT: %[[VAL_10:[a-zA-Z0-9_.$-]+]] = pto.vmi.truncf %[[VAL_4]] {rounding = "Z", saturate = "NOSAT"} : !pto.vmi.vreg<256xf32, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<256xbf16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+// ASSIGN-NEXT: %[[VAL_11:[a-zA-Z0-9_.$-]+]] = pto.vmi.extf %[[VAL_5]] : !pto.vmi.vreg<256xbf16, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<256xf32, #pto.vmi.layout<contiguous>>
+// ASSIGN-NEXT: return
+// ASSIGN-NEXT: }
+// ASSIGN-LABEL: func.func @bf16_f32_group_slot_cast_preference(
+// ASSIGN-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>>,
+// ASSIGN-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: !pto.vmi.mask<128xb32, #pto.vmi.layout<contiguous>>,
+// ASSIGN-SAME: %[[VAL_2:[a-zA-Z0-9_.$-]+]]: !pto.ptr<bf16, ub>,
+// ASSIGN-SAME: %[[VAL_3:[a-zA-Z0-9_.$-]+]]: !pto.ptr<f32, ub>,
+// ASSIGN-SAME: %[[VAL_4:[a-zA-Z0-9_.$-]+]]: index) {
+// ASSIGN-NEXT: %[[VAL_5:[a-zA-Z0-9_.$-]+]] = arith.constant 1 : index
+// ASSIGN-NEXT: %[[VAL_6:[a-zA-Z0-9_.$-]+]] = pto.vmi.ensure_layout %[[VAL_0]] : !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// ASSIGN-NEXT: %[[VAL_7:[a-zA-Z0-9_.$-]+]] = pto.vmi.ensure_mask_layout %[[VAL_1]] : !pto.vmi.mask<128xb32, #pto.vmi.layout<contiguous>> -> !pto.vmi.mask<128xb32, #pto.vmi.layout<deinterleaved = 2>>
+// ASSIGN-NEXT: %[[VAL_8:[a-zA-Z0-9_.$-]+]] = pto.vmi.group_reduce_addf %[[VAL_6]], %[[VAL_7]] {num_groups = 8 : i64, reassoc} : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>, !pto.vmi.mask<128xb32, #pto.vmi.layout<deinterleaved = 2>> -> !pto.vmi.vreg<8xf32, #pto.vmi.layout<num_groups = 8, slots = 8>>
+// ASSIGN-NEXT: %[[VAL_9:[a-zA-Z0-9_.$-]+]] = pto.vmi.truncf %[[VAL_8]] {rounding = "Z", saturate = "NOSAT"} : !pto.vmi.vreg<8xf32, #pto.vmi.layout<num_groups = 8, slots = 8>> -> !pto.vmi.vreg<8xbf16, #pto.vmi.layout<num_groups = 8, slots = 8>>
+// ASSIGN-NEXT: %[[VAL_10:[a-zA-Z0-9_.$-]+]] = pto.vmi.extf %[[VAL_9]] : !pto.vmi.vreg<8xbf16, #pto.vmi.layout<num_groups = 8, slots = 8>> -> !pto.vmi.vreg<8xf32, #pto.vmi.layout<num_groups = 8, slots = 8>>
+// ASSIGN-NEXT: pto.vmi.group_store %[[VAL_9]], %[[VAL_2]]{{\[}}%[[VAL_4]]], %[[VAL_5]] {num_groups = 8 : i64} : !pto.vmi.vreg<8xbf16, #pto.vmi.layout<num_groups = 8, slots = 8>>, !pto.ptr<bf16, ub>
+// ASSIGN-NEXT: pto.vmi.group_store %[[VAL_10]], %[[VAL_3]]{{\[}}%[[VAL_4]]], %[[VAL_5]] {num_groups = 8 : i64} : !pto.vmi.vreg<8xf32, #pto.vmi.layout<num_groups = 8, slots = 8>>, !pto.ptr<f32, ub>
+// ASSIGN-NEXT: return
+// ASSIGN-NEXT: }

@@ -117,11 +117,14 @@ def main() -> None:
     expect_count(vpto, "pto.vand", 2)
     expect_count(vpto, "pto.vmax", 1)
     expect_count(vpto, "pto.vcgmax", 1)
-    expect_count(vpto, "pto.vbitcast", 3)
+    # BF16 widening uses zero/source interleaves and four physical F32 views.
+    # Quantization stores each packed F32 carrier directly, without vor merges.
+    expect_count(vpto, "pto.vbitcast", 7)
     expect_count(vpto, "pto.vmul", 2)
-    expect_count(vpto, "pto.vcvt", 8)
-    expect_count(vpto, "pto.vor", 3)
-    expect_count(vpto, "pto.vsts", 2)
+    expect_count(vpto, "pto.vintlv", 3)
+    expect_count(vpto, "pto.vcvt", 4)
+    expect_count(vpto, "pto.vor", 0)
+    expect_count(vpto, "pto.vsts", 5)
     if "DINTLV_B16" not in vpto:
         raise AssertionError(f"expected one deinterleaved BF16 load:\n{vpto}")
     reduction = vpto[: vpto.index("pto.vcgmax")]
@@ -134,7 +137,7 @@ def main() -> None:
     # be scheduled before the muls by VPTOScheduler when the store address is a
     # resolvable constant (signless i64 pointer carriers); that is a legal,
     # more aggressive schedule and does not reintroduce a memory round-trip,
-    # so a vsts in this window is tolerated. The vsts total (2) is asserted
+    # so a vsts in this window is tolerated. The vsts total (5) is asserted
     # separately above.
     broadcast = vpto[vpto.index("pto.vcgmax") : vpto.index("pto.vmul")]
     if "pto.vlds" in broadcast:

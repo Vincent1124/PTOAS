@@ -219,6 +219,11 @@ scripts/sim_dsl.sh test/dsl-st
 python3 ptodsl/tests/test_jit_compile.py
 ```
 
+复杂测试若耗尽 layout 搜索预算，可在该 kernel 的 `@pto.jit` 上显式设置
+`ptoas_flags=("--vmi-layout-max-frontier-entries=512",)`。选项只传给这个
+kernel 的 native build，并纳入缓存标识；其他 kernel 继续使用编译器默认预算。
+不要通过修改全局默认预算或隐藏重试来放行测试。
+
 ## 编写建议
 
 - 优先让 golden 直接表达语义，不要把 expected 写成难懂的魔数堆。

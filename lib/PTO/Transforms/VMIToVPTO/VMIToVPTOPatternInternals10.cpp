@@ -394,12 +394,14 @@ private:
       OneToNPatternRewriter &rewriter) const {
     // 8-bit sources stored with lane_stride = 2 (UNPK_B8) keep valid bytes on
     // even lanes. P0 plus P2 cover them; P1/P3 are zero-fill gaps. This
-    // applies to packed f4E2M1x2 and dense FP8/HiF8 alike.
+    // applies both to the packed f4 formats (F4E1M2x2 and F4E2M1x2) and to
+    // dense FP8/HiF8 alike. The f4 encoding does not affect the byte-lane
+    // selection the {P0, P2} pair performs, so both packed formats take it.
     Type sourceElementType = plan.sourceType.getElementType();
     bool packedLaneStride2 =
         sourceLayout && sourceLayout.isContiguous() &&
         sourceLayout.getLaneStride() == 2 &&
-        (isa<pto::F4E2M1x2Type>(sourceElementType) ||
+        (pto::isPTOFloat4PackedType(sourceElementType) ||
          pto::isPTOFloat8Type(sourceElementType) ||
          pto::isPTOHiFloat8Type(sourceElementType)) &&
         plan.resultTypes.size() == 2 * sourceParts.size();

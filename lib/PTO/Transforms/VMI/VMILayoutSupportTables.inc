@@ -31,6 +31,8 @@ static constexpr EnsureLayoutPattern kEnsureLayoutPatterns[] = {
     // than as the group counts any one producer happens to emit.
     {bits<8, 16, 32, 64>(), anyN(), gsFit(), c()},
     {bits<8, 16, 32, 64>(), anyN(), c(), gsFit()},
+    {bits<8, 16, 32, 64>(), N<1>(), c(), gs(1)},
+    {bits<8, 16, 32, 64>(), N<1>(), gs(1), c()},
 
     // A 128-element 16-bit value is a sub-chunk carrier: the tail group
     // reduction reaches its deinterleaved=2 source only through this bridge,
@@ -43,9 +45,15 @@ static constexpr EnsureLayoutPattern kEnsureLayoutPatterns[] = {
     {bits<32>(), N<128, 256>(), d(2), c()},
     {bits<64>(), N<64, 128, 256>(), d(2), c()},
 
+    {bits<16>(), N<256, 768>(), c(), d(4)},
     {bits<32>(), N<256>(), c(), d(4)},
+    {bits<32>(), N<512>(), c(), d(4)},
+    {bits<32>(), N<128>(), c(), d(4)},
     {bits<64>(), N<128, 256>(), c(), d(4)},
+    {bits<16>(), N<256, 768>(), d(4), c()},
     {bits<32>(), N<256>(), d(4), c()},
+    {bits<32>(), N<512>(), d(4), c()},
+    {bits<32>(), N<128>(), d(4), c()},
     {bits<64>(), N<128, 256>(), d(4), c()},
 
     {bits<32>(), N<128, 256, 512>(), d(2), d(4)},
@@ -116,18 +124,22 @@ struct EnsureMaskLayoutPattern {
   LayoutPattern resultLayout;
 };
 
+// Block-deinterleaved predicates reorder 32B blocks. Their conversion uses
+// explicit vector selection and comparison, never identity forwarding.
 static constexpr EnsureMaskLayoutPattern kEnsureMaskLayoutPatterns[] = {
+    {mb32(), N<128>(), c(), bd(2)},
+    {mb32(), N<128>(), bd(2), c()},
+    {mb32(), N<256>(), c(), bd(4)},
+    {mb32(), N<256>(), bd(4), c()},
     {mb16(), N<128, 256>(), c(), d(2)},
     {mb32(), N<128, 256, 512>(), c(), d(2)},
-    {mb32(), N<128>(), c(), bd(2)},
     {mb16(), N<128, 256>(), d(2), c()},
     {mb32(), N<128, 256, 512>(), d(2), c()},
-    {mb32(), N<128>(), bd(2), c()},
 
     {mb32(), N<256>(), c(), d(4)},
-    {mb32(), N<256>(), c(), bd(4)},
+    {mb16(), N<256, 768>(), c(), d(4)},
     {mb32(), N<256>(), d(4), c()},
-    {mb32(), N<256>(), bd(4), c()},
+    {mb16(), N<256, 768>(), d(4), c()},
 
     {mb8(), N<1, 2, 4, 8, 64, 128>(), c(), ls(2)},
     {mb16(), N<1, 2, 4, 8, 64>(), c(), ls(2)},
@@ -142,6 +154,29 @@ static constexpr EnsureMaskLayoutPattern kEnsureMaskLayoutPatterns[] = {
     {mb8(), N<1, 2, 4, 8, 64>(), ls(4), c()},
     {mb16(), N<1, 2, 4, 8>(), ls(4), c()},
     {mb32(), N<1, 2, 4, 8>(), ls(4), c()},
+};
+
+// A generated group mask is built by a predicate-generating instruction that
+// writes one predicate per physical part in a fixed layout.  When the assigned
+// result layout differs from that generation layout, the mask has to be
+// rearranged first, so the cost model has to know both layouts.  A row whose
+// two layouts are equal is the identity: the mask is generated in place.
+enum class GeneratedMaskKind {
+    GroupConstant,
+    GroupDynamic,
+};
+
+struct GeneratedMaskStagingPattern {
+    GeneratedMaskKind kind;
+    LayoutPattern resultLayout;
+    LayoutPattern generationLayout;
+};
+
+static constexpr GeneratedMaskStagingPattern kGeneratedMaskStagingPatterns[] = {
+    {GeneratedMaskKind::GroupDynamic, d(2), c()},
+    {GeneratedMaskKind::GroupDynamic, d(4), c()},
+    {GeneratedMaskKind::GroupDynamic, bd(4), bd(4)},
+    {GeneratedMaskKind::GroupConstant, bd(4), bd(4)},
 };
 
 struct GroupBlockClassPattern {
@@ -265,6 +300,7 @@ struct GroupLoadLayoutPattern {
   GroupBlockPattern block = gb(2);
   GroupMemoryPattern memory = memAny();
   LayoutPattern resultLayout;
+  bool requiresF32 = false;
 };
 
 static constexpr GroupLoadLayoutPattern kGroupLoadLayoutPatterns[] = {
@@ -274,25 +310,13 @@ static constexpr GroupLoadLayoutPattern kGroupLoadLayoutPatterns[] = {
     {bits<8, 16, 32>(), gb(2), memContiguous(), c()},
     {bits<8, 16, 32>(), gb(4), memContiguous(), c()},
     {bits<8, 16, 32>(), gbFull(), memAny(), c()},
-    // A group load whose source row stride differs from its group size is not
-    // contiguous: the rows above pair `memContiguous()` (row_stride ==
-    // group_size) with the stride-free full-chunk lowering.  A strided source
-    // therefore needs its own row before layout assignment can hand the result
-    // a layout at all.  The result layout is unchanged (`c()`), and the
-    // admissible source shapes are the ones the per-group address plans
-    // implement.  Those plans address whole 32-byte blocks, so the table only
-    // admits groups of 32, 64, or 128 bytes (`gb(1)`, `gb(2)`, `gb(4)`; larger
-    // groups are claimed by the `gbFull()` row above and the full-chunk plan).
-    // Sub-32B strided groups (`gb(1, 2)` / `gb(1, 4)`) have no lowering and are
-    // rejected with the 32-byte granularity contract by
-    // `describeStridedGroupLoadGranularityViolation`, as is a row stride that is
-    // not a whole number of 32-byte blocks.  Listing these after the contiguous
-    // rows keeps first-match precedence for the packed layout.
-    {bits<8, 16, 32>(), gb(1), memAny(), c()},
-    {bits<8, 16, 32>(), gb(2), memAny(), c()},
-    {bits<8, 16, 32>(), gb(4), memAny(), c()},
-    {bits<32>(), gb(2), memBlockAligned(), bd(2)},
-    {bits<32>(), gb(4), memBlockAligned(), bd(4)},
+    // Strided sub-part loads use f32 32B block reads. A one-block group
+    // fills contiguous carriers; larger groups split their blocks across
+    // carriers and therefore produce block-deinterleaved layouts. Declaring
+    // the latter contiguous would skip the required block permutation.
+    {bits<32>(), gb(1), memBlockAligned(), c(), true},
+    {bits<32>(), gb(2), memBlockAligned(), bd(2), true},
+    {bits<32>(), gb(4), memBlockAligned(), bd(4), true},
 };
 
 struct GroupSlotMemoryLayoutPattern {
@@ -341,42 +365,39 @@ struct GroupBroadcastLoadLayoutPattern {
   ElementCountPattern numGroups = anyG();
 };
 
-static constexpr GroupBroadcastLoadLayoutPattern
-    kGroupBroadcastLoadLayoutPatterns[] = {
-        {gb(1, 4), bits<8, 16, 32>(), memContiguous(), ls(4)},
-        {gb(1, 2), bits<8, 16, 32>(), memContiguous(), ls(2)},
-        {gb(1), bits<8, 16, 32>(), memContiguous(), c()},
-        {gb(2), bits<8, 16, 32>(), memContiguous(), c()},
-        {gb(2), bits<8, 16, 32>(), memContiguous(), d(2)},
-        {gb(4), bits<8, 16, 32>(), memContiguous(), c()},
-        {gb(4), bits<8, 16, 32>(), memContiguous(), d(4)},
-        // A constant non-unit group stride only relocates each group's base and
-        // the per-group BRC plan addresses groups individually, so every dense
-        // sub-full-part broadcast admits an arbitrary constant stride.
-        {gb(1), bits<8, 16, 32>(), memAny(), c()},
-        {gb(2), bits<8, 16, 32>(), memAny(), c()},
-        {gb(4), bits<8, 16, 32>(), memAny(), c()},
-        // Same single-element-broadcast argument as the gbFull rows below: a
-        // contiguous lane_stride = 2 carrier needs no data rearrangement.
-        {gb(4), bits<8, 16, 32>(), memContiguous(), ls(2), G<1>()},
-        {gbFull(), bits<8, 16, 32>(), memAny(), c()},
-        // A single-group BRC is a scalar broadcast. Its equal-valued result
-        // may use a deinterleaved physical layout without data rearrangement.
-        {gbFull(), bits<8, 16, 32>(), memAny(), d(2), G<1>()},
-        {gbFull(), bits<8, 16, 32>(), memAny(), d(4), G<1>()},
-        // Same argument for the lane-strided physical carriers: every lane of a
-        // single-group broadcast holds the same element, so a contiguous
-        // lane_stride = 2 result needs no rearrangement either. This row also
-        // supports the scalar broadcast-load form synthesized from a one-lane
-        // load followed by an ungrouped broadcast.
-        {gbFull(), bits<8, 16, 32>(), memAny(), ls(2), G<1>()},
-        // A single-group broadcast is a scalar BRC for the sub-block group
-        // sizes as well: the whole-part form fills every physical chunk with
-        // the one element, so a short gb(1,2)/gb(1,4) result admits the packed
-        // contiguous carrier the same way a gb(1) result does. The group base
-        // never moves (offset + stride * 0), so any stride stays legal.
-        {gb(1, 2), bits<8, 16, 32>(), memAny(), c(), G<1>()},
-        {gb(1, 4), bits<8, 16, 32>(), memAny(), c(), G<1>()},
+static constexpr GroupBroadcastLoadLayoutPattern kGroupBroadcastLoadLayoutPatterns[] = {
+    {gb(1, 4), bits<8, 16, 32>(), memContiguous(), ls(4)},
+    {gb(1, 2), bits<8, 16, 32>(), memContiguous(), ls(2)},
+    {gb(1), bits<8, 16, 32>(), memContiguous(), c()},
+    {gb(1), bits<16, 32>(), memContiguous(), d(4)},
+    {gb(2), bits<8, 16, 32>(), memContiguous(), c()},
+    {gb(2), bits<8, 16, 32>(), memContiguous(), d(2)},
+    {gb(4), bits<8, 16, 32>(), memContiguous(), c()},
+    {gb(4), bits<8, 16, 32>(), memContiguous(), d(4)},
+    // A constant non-unit group stride only relocates each group's base and
+    // the per-group BRC plan addresses groups individually, so every dense
+    // sub-full-part broadcast admits an arbitrary constant stride.
+    {gb(1), bits<8, 16, 32>(), memAny(), c()},
+    {gb(2), bits<8, 16, 32>(), memAny(), c()},
+    {gb(4), bits<8, 16, 32>(), memAny(), c()},
+    // Same single-element-broadcast argument as the gbFull rows below: a
+    // contiguous lane_stride = 2 carrier needs no data rearrangement.
+    {gb(4), bits<8, 16, 32>(), memContiguous(), ls(2), G<1>()},
+    {gbFull(), bits<8, 16, 32>(), memAny(), c()},
+    // A single-group BRC is a scalar broadcast. Its equal-valued result
+    // may use a deinterleaved physical layout without data rearrangement.
+    {gbFull(), bits<8, 16, 32>(), memAny(), d(2), G<1>()},
+    {gbFull(), bits<8, 16, 32>(), memAny(), d(4), G<1>()},
+    // Same argument for the lane-strided physical carriers: every lane of a
+    // single-group broadcast holds the same element, so a contiguous
+    // lane_stride = 2 result needs no rearrangement either. This row also
+    // supports the scalar broadcast-load form synthesized from a one-lane
+    // load followed by an ungrouped broadcast.
+    {gbFull(), bits<8, 16, 32>(), memAny(), ls(2), G<1>()},
+    // A scalar broadcast fills each carrier even for sub-block results.
+    // Its sole group base is independent of the source group stride.
+    {gb(1, 2), bits<8, 16, 32>(), memAny(), c(), G<1>()},
+    {gb(1, 4), bits<8, 16, 32>(), memAny(), c(), G<1>()},
 };
 
 struct GroupBroadcastLoadDirectPattern {
@@ -388,47 +409,37 @@ struct GroupBroadcastLoadDirectPattern {
   LayoutPattern resultLayout;
 };
 
-static constexpr GroupBroadcastLoadDirectPattern
-    kGroupBroadcastLoadDirectPatterns[] = {
-        // E2B always reads one full eight-group packet; a packet that covers
-        // more groups than the result needs keeps its surplus groups outside
-        // the result layout.  The surplus read stays inside the full physical
-        // chunk the load safety policy already grants, so a four-group result
-        // (for example a 128-column scale tail) may use the same packet.
-        {VMIGroupBroadcastLoadDirectKind::E2B, G<8, 4>(), gb(1),
-         bits<16, 32>(), memContiguous(), c()},
-        {VMIGroupBroadcastLoadDirectKind::E2B, G<8, 4>(), gb(2),
-         bits<16, 32>(), memContiguous(), d(2)},
-        {VMIGroupBroadcastLoadDirectKind::E2B, G<8, 4>(), gb(4),
-         bits<16, 32>(), memContiguous(), d(4)},
-        // A dense sub-full-part group is materialized by one lane-zero BRC
-        // load per logical group plus a prefix-mask select tree, so it needs
-        // only element alignment and never a 32B-aligned pto.vsldb base.
-        {VMIGroupBroadcastLoadDirectKind::BRC, anyG(), gb(1), bits<8, 16, 32>(), memAny(), c()},
-        {VMIGroupBroadcastLoadDirectKind::BRC, anyG(), gb(2), bits<8, 16, 32>(), memAny(), c()},
-        {VMIGroupBroadcastLoadDirectKind::BRC, anyG(), gb(4), bits<8, 16, 32>(), memAny(), c()},
-        {VMIGroupBroadcastLoadDirectKind::BRC, anyG(), gbFull(),
-         bits<8, 16, 32>(), memAny(), c()},
-        // Scalar BRC can be emitted once per physical result chunk, so its
-        // equal-valued result is also directly available as d2/d4.
-        {VMIGroupBroadcastLoadDirectKind::BRC, G<1>(), gbFull(),
-         bits<8, 16, 32>(), memAny(), d(2)},
-        {VMIGroupBroadcastLoadDirectKind::BRC, G<1>(), gbFull(),
-         bits<8, 16, 32>(), memAny(), d(4)},
-        // A 256-lane part on an 8-bit element type covers 32 VCG block
-        // elements, so a 128-lane single-group broadcast is a gb(4) group (half
-        // a part), not gbFull.  It is still a scalar broadcast whose
-        // equal-valued result may be carried contiguously with lane_stride = 2.
-        {VMIGroupBroadcastLoadDirectKind::BRC, G<1>(), gb(4),
-         bits<8, 16, 32>(), memAny(), ls(2)},
-        // Same scalar-BRC argument one block size down: a single-group
-        // gb(1,2)/gb(1,4) broadcast fills each physical chunk with its one
-        // element, so the short 8/16-bit results reach the whole-part BRC form
-        // with a packed contiguous carrier.
-        {VMIGroupBroadcastLoadDirectKind::BRC, G<1>(), gb(1, 2),
-         bits<8, 16, 32>(), memAny(), c()},
-        {VMIGroupBroadcastLoadDirectKind::BRC, G<1>(), gb(1, 4),
-         bits<8, 16, 32>(), memAny(), c()},
+static constexpr GroupBroadcastLoadDirectPattern kGroupBroadcastLoadDirectPatterns[] = {
+    // E2B always reads one full eight-group packet; a packet that covers
+    // more groups than the result needs keeps its surplus groups outside
+    // the result layout.  The surplus read stays inside the full physical
+    // chunk the load safety policy already grants, so a four-group result
+    // (for example a 128-column scale tail) may use the same packet.
+    {VMIGroupBroadcastLoadDirectKind::E2B, G<8, 4>(), gb(1), bits<16, 32>(), memContiguous(), c()},
+    {VMIGroupBroadcastLoadDirectKind::E2B, G<8, 4>(), gb(2), bits<16, 32>(), memContiguous(), d(2)},
+    {VMIGroupBroadcastLoadDirectKind::E2B, G<8, 4>(), gb(4), bits<16, 32>(), memContiguous(), d(4)},
+    // A dense sub-full-part group is materialized by one lane-zero BRC
+    // load per logical group plus a prefix-mask select tree, so it needs
+    // only element alignment and never a 32B-aligned pto.vsldb base.
+    {VMIGroupBroadcastLoadDirectKind::BRC, anyG(), gb(1), bits<8, 16, 32>(), memAny(), c()},
+    {VMIGroupBroadcastLoadDirectKind::BRC, anyG(), gb(2), bits<8, 16, 32>(), memAny(), c()},
+    {VMIGroupBroadcastLoadDirectKind::BRC, anyG(), gb(4), bits<8, 16, 32>(), memAny(), c()},
+    {VMIGroupBroadcastLoadDirectKind::BRC, anyG(), gbFull(), bits<8, 16, 32>(), memAny(), c()},
+    // Scalar BRC can be emitted once per physical result chunk, so its
+    // equal-valued result is also directly available as d2/d4.
+    {VMIGroupBroadcastLoadDirectKind::BRC, G<1>(), gbFull(), bits<8, 16, 32>(), memAny(), d(2)},
+    {VMIGroupBroadcastLoadDirectKind::BRC, G<1>(), gbFull(), bits<8, 16, 32>(), memAny(), d(4)},
+    // Match the full-part scalar lane-stride row in the support table.
+    // Each physical result carrier receives the same scalar BRC load.
+    {VMIGroupBroadcastLoadDirectKind::BRC, G<1>(), gbFull(), bits<8, 16, 32>(), memAny(), ls(2)},
+    // A 256-lane part on an 8-bit element type covers 32 VCG block
+    // elements, so a 128-lane single-group broadcast is a gb(4) group (half
+    // a part), not gbFull.  It is still a scalar broadcast whose
+    // equal-valued result may be carried contiguously with lane_stride = 2.
+    {VMIGroupBroadcastLoadDirectKind::BRC, G<1>(), gb(4), bits<8, 16, 32>(), memAny(), ls(2)},
+    // Short scalar results also use one whole-part BRC per carrier.
+    {VMIGroupBroadcastLoadDirectKind::BRC, G<1>(), gb(1, 2), bits<8, 16, 32>(), memAny(), c()},
+    {VMIGroupBroadcastLoadDirectKind::BRC, G<1>(), gb(1, 4), bits<8, 16, 32>(), memAny(), c()},
 };
 
 struct VselrLayoutPattern {
@@ -458,6 +469,39 @@ static constexpr VselrLayoutPattern kVselrLayoutPatterns[] = {
     {bits<32>(), N<64>(), N<64>(), N<64>(), chunk<1>(), chunk<1>(),
      chunk<1>(), c(), c(), c()},
 };
+
+// Supported pto.vmi.vexpdif relations.  A row describes the layout of x and
+// max (the mask always shares it, because the VPTO lowering requires the mask
+// to keep the data's lane order and to keep matching its element width) and
+// the layout of the result.  See VMIVexpdifLayoutFact for why the supported
+// set is this small.
+struct VexpdifLayoutPattern {
+    ElementBitsPattern sourceBits;
+    ElementBitsPattern resultBits;
+    LayoutPattern sourceLayout;
+    LayoutPattern resultLayout;
+    bool preferred = false;
+};
+
+static constexpr VexpdifLayoutPattern kVexpdifLayoutPatterns[] = {
+    // An f32 source keeps its element width: x/max, the mask, and the result
+    // stay in one lane_stride = 1 layout.
+    {bits<32>(), bits<32>(), c(), c(), true},
+    {bits<32>(), bits<32>(), d(2), d(2)},
+    {bits<32>(), bits<32>(), d(4), d(4)},
+    {bits<32>(), bits<32>(), bd(2), bd(2)},
+    {bits<32>(), bits<32>(), bd(4), bd(4)},
+    // An f16 source widens: the two physical results of one source part are
+    // exactly the even and the odd lanes of that part.
+    {bits<16>(), bits<32>(), c(), d(2), true},
+};
+
+// A lane-strided source is not in the table on purpose.  The mask shares the
+// source layout, and a mask granularity of b16/b32 with lane_stride = 2/4
+// becomes a b32/b64/b128 physical predicate carrier, which the mask carrier
+// conversion and the pto.vexpdif mask granularity check both reject.  The
+// same lane_stride = 1 rule keeps every result part pair an even/odd lane
+// split of its own source part.
 
 struct HistogramLayoutPattern {
   LayoutPattern accLayout;

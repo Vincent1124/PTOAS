@@ -29,15 +29,15 @@ module {
 }
 
 // ASSIGN-LABEL: func.func @dense_fp8_ls4_widen(
-// ASSIGN: pto.vmi.load {{.*}} -> !pto.vmi.vreg<128xf8E4M3FN, #pto.vmi.layout<contiguous, lane_stride = 4>>
-// ASSIGN: pto.vmi.extf {{.*}} : !pto.vmi.vreg<128xf8E4M3FN, #pto.vmi.layout<contiguous, lane_stride = 4>> -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>>
+// ASSIGN: pto.vmi.load {{.*}} -> !pto.vmi.vreg<128xf8E4M3FN, #pto.vmi.layout<contiguous, lane_stride = 2>>
+// ASSIGN: pto.vmi.extf {{.*}} : !pto.vmi.vreg<128xf8E4M3FN, #pto.vmi.layout<contiguous, lane_stride = 2>> -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
 
 // VPTO-LABEL: func.func @dense_fp8_ls4_widen(
 // VPTO: pto.vldus
-// VPTO-COUNT-2: pto.vcvt {{.*}} {part = "P0"} : !pto.vreg<256xf8E4M3FN>, !pto.mask<b8> -> !pto.vreg<64xf32>
+// VPTO: pto.vcvt {{.*}} {part = "P0"} : !pto.vreg<256xf8E4M3FN>, !pto.mask<b8> -> !pto.vreg<64xf32>
 // VPTO-NOT: part = "P1"
-// VPTO-NOT: part = "P2"
 // VPTO-NOT: part = "P3"
-// VPTO-NOT: pto.vintlv
+// VPTO: pto.vcvt {{.*}} {part = "P2"} : !pto.vreg<256xf8E4M3FN>, !pto.mask<b8> -> !pto.vreg<64xf32>
+// VPTO: pto.vintlv
 // VPTO-NOT: pto.vmi.
 // VPTO-NOT: !pto.vmi.

@@ -1880,44 +1880,44 @@ struct OneToNVMIReduceAddFOpPattern
 };
 
 enum class GroupReduceLoweringPlan {
-  CompactMaskedRows,
-  OneBlockVcgadd,
-  TwoBlockDeinterleaved2VcgaddVadd,
-  FourBlockDeinterleaved4VcgaddTree,
-  FullDeinterleaved2VcaddRows,
-  ContiguousVcaddRows,
+    CompactMaskedRows,
+    OneBlockVcgadd,
+    TwoBlockDeinterleaved2VcgaddVadd,
+    FourBlockDeinterleaved4VcgaddTree,
+    FullDeinterleavedVcaddRows,
+    ContiguousVcaddRows,
 };
 
 FailureOr<GroupReduceLoweringPlan> classifyGroupReduceLoweringPlan(
-    VMIGroupReduceKind kind, VMIVRegType sourceType, VMIMaskType maskType,
-    VMIVRegType resultType, int64_t numGroups, std::string *reason = nullptr) {
-  VMILayoutSupport supports;
-  FailureOr<VMIGroupReduceLayoutFact> fact =
-      supports.getGroupReduceLayoutFactForLayouts(
-          kind, sourceType, maskType, resultType, numGroups, reason);
-  if (failed(fact)) {
-    return failure();
-  }
-
-  switch (fact->blockClass) {
-  case VMIGroupBlockClass::Compact:
-    return GroupReduceLoweringPlan::CompactMaskedRows;
-  case VMIGroupBlockClass::QuarterBlock:
-  case VMIGroupBlockClass::HalfBlock:
-  case VMIGroupBlockClass::OneBlock:
-    return GroupReduceLoweringPlan::OneBlockVcgadd;
-  case VMIGroupBlockClass::TwoBlock:
-    return GroupReduceLoweringPlan::TwoBlockDeinterleaved2VcgaddVadd;
-  case VMIGroupBlockClass::FourBlock:
-    return GroupReduceLoweringPlan::FourBlockDeinterleaved4VcgaddTree;
-  case VMIGroupBlockClass::FullPartMultiple:
-    bool deinterleavedSource =
-        fact->sourceLayout && fact->sourceLayout.isDeinterleaved() &&
-        fact->sourceLayout.getFactor() == kInterleaveFactor;
-    if (deinterleavedSource) {
-      return GroupReduceLoweringPlan::FullDeinterleaved2VcaddRows;
+    VMIGroupReduceKind kind, VMIVRegType sourceType, VMIMaskType maskType, VMIVRegType resultType, int64_t numGroups,
+    std::string* reason = nullptr)
+{
+    VMILayoutSupport supports;
+    FailureOr<VMIGroupReduceLayoutFact> fact =
+        supports.getGroupReduceLayoutFactForLayouts(kind, sourceType, maskType, resultType, numGroups, reason);
+    if (failed(fact)) {
+        return failure();
     }
-    return GroupReduceLoweringPlan::ContiguousVcaddRows;
-  }
-  llvm_unreachable("unknown group block class");
+
+    switch (fact->blockClass) {
+        case VMIGroupBlockClass::Compact:
+            return GroupReduceLoweringPlan::CompactMaskedRows;
+        case VMIGroupBlockClass::QuarterBlock:
+        case VMIGroupBlockClass::HalfBlock:
+        case VMIGroupBlockClass::OneBlock:
+            return GroupReduceLoweringPlan::OneBlockVcgadd;
+        case VMIGroupBlockClass::TwoBlock:
+            return GroupReduceLoweringPlan::TwoBlockDeinterleaved2VcgaddVadd;
+        case VMIGroupBlockClass::FourBlock:
+            return GroupReduceLoweringPlan::FourBlockDeinterleaved4VcgaddTree;
+        case VMIGroupBlockClass::FullPartMultiple:
+            bool deinterleavedSource = fact->sourceLayout && fact->sourceLayout.isDeinterleaved() &&
+                                       (fact->sourceLayout.getFactor() == kInterleaveFactor ||
+                                        fact->sourceLayout.getFactor() == kDeintFactor4);
+            if (deinterleavedSource) {
+                return GroupReduceLoweringPlan::FullDeinterleavedVcaddRows;
+            }
+            return GroupReduceLoweringPlan::ContiguousVcaddRows;
+    }
+    llvm_unreachable("unknown group block class");
 }

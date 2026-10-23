@@ -7,6 +7,14 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 // RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-pre-assignment-combine -vmi-mask-granularity-assignment -vmi-layout-assignment -vmi-to-vpto | FileCheck %s
+// RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-pre-assignment-combine -vmi-mask-granularity-assignment -vmi-layout-assignment | FileCheck %s --check-prefix=ASSIGN
+
+// Scalar BRC supports unit-stride and lane-strided layouts. The physical
+// memory cost must count every carrier: 128xf32 needs two contiguous carriers
+// versus four with lane_stride=2, so the unconstrained result stays contiguous.
+// ASSIGN-LABEL: func.func @vmi_layout_assignment_group_slot_broadcast_load_brc_b32_two_chunks(
+// ASSIGN: pto.vmi.group_broadcast_load
+// ASSIGN-SAME: -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>>
 
 module {
   func.func @vmi_layout_assignment_group_slot_broadcast_load_brc_b32(

@@ -29,11 +29,47 @@ module {
 }
 
 // CHECK-LABEL: func.func @vmi_to_vpto_iota_group_size1_i8_256(
-// CHECK-SAME: %[[BASE:.*]]: i8
-// CHECK-NOT: pto.vci
-// CHECK: %[[C1:.*]] = arith.constant 1 : i8
-// CHECK: %[[DUP:.*]] = pto.vdup %[[BASE]]
-// CHECK-NOT: pto.vsel
-// CHECK: pto.vadds %[[DUP]], %[[C1]]
-// CHECK: pto.vsts
-// CHECK-NOT: pto.vmi.
+// CHECK-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: i8,
+// CHECK-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: !pto.ptr<i8, ub>,
+// CHECK-SAME: %[[VAL_2:[a-zA-Z0-9_.$-]+]]: !pto.mask<b32>,
+// CHECK-SAME: %[[VAL_3:[a-zA-Z0-9_.$-]+]]: !pto.mask<b32>,
+// CHECK-SAME: %[[VAL_4:[a-zA-Z0-9_.$-]+]]: !pto.mask<b32>,
+// CHECK-SAME: %[[VAL_5:[a-zA-Z0-9_.$-]+]]: !pto.mask<b32>) {
+// CHECK-NEXT: %[[VAL_6:[a-zA-Z0-9_.$-]+]] = arith.constant 192 : index
+// CHECK-NEXT: %[[VAL_7:[a-zA-Z0-9_.$-]+]] = arith.constant 128 : index
+// CHECK-NEXT: %[[VAL_8:[a-zA-Z0-9_.$-]+]] = arith.constant 64 : index
+// CHECK-NEXT: %[[VAL_9:[a-zA-Z0-9_.$-]+]] = arith.constant 1 : index
+// CHECK-NEXT: %[[VAL_10:[a-zA-Z0-9_.$-]+]] = arith.constant 1 : i8
+// CHECK-NEXT: %[[VAL_11:[a-zA-Z0-9_.$-]+]] = arith.constant 0 : index
+// CHECK-NEXT: %[[VAL_12:[a-zA-Z0-9_.$-]+]] = pto.pset_b8 "PAT_ALL" : !pto.mask<b8>
+// CHECK-NEXT: %[[VAL_13:[a-zA-Z0-9_.$-]+]] = pto.vdup %[[VAL_0]], %[[VAL_12]] : i8, !pto.mask<b8> -> !pto.vreg<256xi8>
+// CHECK-NEXT: %[[VAL_14:[a-zA-Z0-9_.$-]+]] = pto.vbitcast %[[VAL_13]] : !pto.vreg<256xi8> -> !pto.vreg<256xui8>
+// CHECK-NEXT: %[[VAL_15:[a-zA-Z0-9_.$-]+]] = pto.vzunpack %[[VAL_14]], %[[VAL_11]] : !pto.vreg<256xui8> -> !pto.vreg<128xui16>
+// CHECK-NEXT: %[[VAL_16:[a-zA-Z0-9_.$-]+]] = pto.vzunpack %[[VAL_15]], %[[VAL_11]] : !pto.vreg<128xui16> -> !pto.vreg<64xui32>
+// CHECK-NEXT: %[[VAL_17:[a-zA-Z0-9_.$-]+]] = pto.vbitcast %[[VAL_16]] : !pto.vreg<64xui32> -> !pto.vreg<256xi8>
+// CHECK-NEXT: %[[VAL_18:[a-zA-Z0-9_.$-]+]] = pto.vbitcast %[[VAL_13]] : !pto.vreg<256xi8> -> !pto.vreg<256xui8>
+// CHECK-NEXT: %[[VAL_19:[a-zA-Z0-9_.$-]+]] = pto.vzunpack %[[VAL_18]], %[[VAL_11]] : !pto.vreg<256xui8> -> !pto.vreg<128xui16>
+// CHECK-NEXT: %[[VAL_20:[a-zA-Z0-9_.$-]+]] = pto.vzunpack %[[VAL_19]], %[[VAL_9]] : !pto.vreg<128xui16> -> !pto.vreg<64xui32>
+// CHECK-NEXT: %[[VAL_21:[a-zA-Z0-9_.$-]+]] = pto.vbitcast %[[VAL_20]] : !pto.vreg<64xui32> -> !pto.vreg<256xi8>
+// CHECK-NEXT: %[[VAL_22:[a-zA-Z0-9_.$-]+]] = pto.vbitcast %[[VAL_13]] : !pto.vreg<256xi8> -> !pto.vreg<256xui8>
+// CHECK-NEXT: %[[VAL_23:[a-zA-Z0-9_.$-]+]] = pto.vzunpack %[[VAL_22]], %[[VAL_9]] : !pto.vreg<256xui8> -> !pto.vreg<128xui16>
+// CHECK-NEXT: %[[VAL_24:[a-zA-Z0-9_.$-]+]] = pto.vzunpack %[[VAL_23]], %[[VAL_11]] : !pto.vreg<128xui16> -> !pto.vreg<64xui32>
+// CHECK-NEXT: %[[VAL_25:[a-zA-Z0-9_.$-]+]] = pto.vbitcast %[[VAL_24]] : !pto.vreg<64xui32> -> !pto.vreg<256xi8>
+// CHECK-NEXT: %[[VAL_26:[a-zA-Z0-9_.$-]+]] = pto.vbitcast %[[VAL_13]] : !pto.vreg<256xi8> -> !pto.vreg<256xui8>
+// CHECK-NEXT: %[[VAL_27:[a-zA-Z0-9_.$-]+]] = pto.vzunpack %[[VAL_26]], %[[VAL_9]] : !pto.vreg<256xui8> -> !pto.vreg<128xui16>
+// CHECK-NEXT: %[[VAL_28:[a-zA-Z0-9_.$-]+]] = pto.vzunpack %[[VAL_27]], %[[VAL_9]] : !pto.vreg<128xui16> -> !pto.vreg<64xui32>
+// CHECK-NEXT: %[[VAL_29:[a-zA-Z0-9_.$-]+]] = pto.vbitcast %[[VAL_28]] : !pto.vreg<64xui32> -> !pto.vreg<256xi8>
+// CHECK-NEXT: %[[VAL_30:[a-zA-Z0-9_.$-]+]] = pto.vadds %[[VAL_17]], %[[VAL_10]], %[[VAL_2]] : !pto.vreg<256xi8>, i8, !pto.mask<b32> -> !pto.vreg<256xi8>
+// CHECK-NEXT: %[[VAL_31:[a-zA-Z0-9_.$-]+]] = pto.vadds %[[VAL_21]], %[[VAL_10]], %[[VAL_3]] : !pto.vreg<256xi8>, i8, !pto.mask<b32> -> !pto.vreg<256xi8>
+// CHECK-NEXT: %[[VAL_32:[a-zA-Z0-9_.$-]+]] = pto.vadds %[[VAL_25]], %[[VAL_10]], %[[VAL_4]] : !pto.vreg<256xi8>, i8, !pto.mask<b32> -> !pto.vreg<256xi8>
+// CHECK-NEXT: %[[VAL_33:[a-zA-Z0-9_.$-]+]] = pto.vadds %[[VAL_29]], %[[VAL_10]], %[[VAL_5]] : !pto.vreg<256xi8>, i8, !pto.mask<b32> -> !pto.vreg<256xi8>
+// CHECK-NEXT: %[[VAL_34:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: pto.vsts %[[VAL_30]], %[[VAL_1]]{{\[}}%[[VAL_11]]], %[[VAL_34]] {dist = "PK4_B32"} : !pto.vreg<256xi8>, !pto.ptr<i8, ub>, !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_35:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: pto.vsts %[[VAL_31]], %[[VAL_1]]{{\[}}%[[VAL_8]]], %[[VAL_35]] {dist = "PK4_B32"} : !pto.vreg<256xi8>, !pto.ptr<i8, ub>, !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_36:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: pto.vsts %[[VAL_32]], %[[VAL_1]]{{\[}}%[[VAL_7]]], %[[VAL_36]] {dist = "PK4_B32"} : !pto.vreg<256xi8>, !pto.ptr<i8, ub>, !pto.mask<b32>
+// CHECK-NEXT: %[[VAL_37:[a-zA-Z0-9_.$-]+]] = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+// CHECK-NEXT: pto.vsts %[[VAL_33]], %[[VAL_1]]{{\[}}%[[VAL_6]]], %[[VAL_37]] {dist = "PK4_B32"} : !pto.vreg<256xi8>, !pto.ptr<i8, ub>, !pto.mask<b32>
+// CHECK-NEXT: return
+// CHECK-NEXT: }

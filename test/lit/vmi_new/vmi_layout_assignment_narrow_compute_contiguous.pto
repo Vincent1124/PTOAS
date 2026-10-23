@@ -12,8 +12,8 @@
 // that side contiguous.  The lane-stride carrier is elementBits * laneStride
 // wide, so it splits the 128-lane bf16 class over two physical parts and makes
 // every sub-word op in the class - here the pto.vmi.vmax - two physical ops.
-// The cast still gets a relation the lowering implements: the default
-// {c(), d(f)} row puts the wide side into the deinterleaved family instead.
+// The native {c(), d(f)} cast puts the wide side into the deinterleaved
+// family and avoids the internal shuffle of same-layout BF16 widening.
 
 module {
   func.func @narrow_side_compute_contiguous(
@@ -35,6 +35,15 @@ module {
 }
 
 // CHECK-LABEL: func.func @narrow_side_compute_contiguous(
-// CHECK: pto.vmi.vmax {{.*}} : !pto.vmi.vreg<128xbf16, #pto.vmi.layout<contiguous>>, !pto.vmi.vreg<128xbf16, #pto.vmi.layout<contiguous>>, {{.*}} -> !pto.vmi.vreg<128xbf16, #pto.vmi.layout<contiguous>>
-// CHECK: pto.vmi.extf {{.*}} : !pto.vmi.vreg<128xbf16, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>>
-// CHECK-NOT: lane_stride = 2
+// CHECK-SAME: %[[VAL_0:[a-zA-Z0-9_.$-]+]]: !pto.vmi.vreg<128xbf16, #pto.vmi.layout<contiguous>>,
+// CHECK-SAME: %[[VAL_1:[a-zA-Z0-9_.$-]+]]: !pto.vmi.vreg<128xbf16, #pto.vmi.layout<contiguous>>,
+// CHECK-SAME: %[[VAL_2:[a-zA-Z0-9_.$-]+]]: !pto.ptr<f32, ub>,
+// CHECK-SAME: %[[VAL_3:[a-zA-Z0-9_.$-]+]]: index) {
+// CHECK-NEXT: %[[VAL_4:[a-zA-Z0-9_.$-]+]] = arith.constant 128 : index
+// CHECK-NEXT: %[[VAL_5:[a-zA-Z0-9_.$-]+]] = pto.vmi.create_mask %[[VAL_4]] : index -> !pto.vmi.mask<128xb32, #pto.vmi.layout<contiguous>>
+// CHECK-NEXT: %[[VAL_6:[a-zA-Z0-9_.$-]+]] = pto.vmi.create_mask %[[VAL_4]] : index -> !pto.vmi.mask<128xb16, #pto.vmi.layout<contiguous>>
+// CHECK-NEXT: %[[VAL_7:[a-zA-Z0-9_.$-]+]] = pto.vmi.vmax %[[VAL_0]], %[[VAL_1]], %[[VAL_6]] : !pto.vmi.vreg<128xbf16, #pto.vmi.layout<contiguous>>, !pto.vmi.vreg<128xbf16, #pto.vmi.layout<contiguous>>, !pto.vmi.mask<128xb16, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<128xbf16, #pto.vmi.layout<contiguous>>
+// CHECK-NEXT: %[[VAL_8:[a-zA-Z0-9_.$-]+]] = pto.vmi.extf %[[VAL_7]] : !pto.vmi.vreg<128xbf16, #pto.vmi.layout<contiguous>> -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>>
+// CHECK-NEXT: pto.vmi.store %[[VAL_8]], %[[VAL_2]]{{\[}}%[[VAL_3]]] : !pto.vmi.vreg<128xf32, #pto.vmi.layout<contiguous>>, !pto.ptr<f32, ub>
+// CHECK-NEXT: return
+// CHECK-NEXT: }

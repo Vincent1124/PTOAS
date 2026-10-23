@@ -8,17 +8,14 @@
 
 ## 1. Pipeline
 
-Recommended pass pipeline:
+默认 driver 的 layout pipeline（省略其他前处理）：
 
 ```text
 pto-validate-vmi-ir
+  -> vmi-layout-rematerialize-weak-producers // pre-assignment preparation
   -> vmi-layout-assignment                  // hard legalization baseline
   -> canonicalize/cse
-  -> vmi-layout-rematerialize               // optional optimization
-  -> canonicalize/cse
-  -> vmi-layout-fold              // optional optimization over remat-exposed helpers
-  -> canonicalize/cse
-  -> vmi-layout-sink-materialization        // optional optimization
+  -> vmi-layout-fold                        // fold supported consumer helpers
   -> canonicalize/cse
   -> vmi-legalize-arith-select
   -> pto-validate-vmi-layout-ir
@@ -26,6 +23,40 @@ pto-validate-vmi-ir
   -> canonicalize/cse
   -> existing VPTO lowering/codegen
 ```
+
+`vmi-layout-rematerialize`、`vmi-layout-sink-materialization` 和
+`vmi-expand-implicit-ensure-layouts` 均不在默认 driver pipeline 中，仅保留显式
+Pass 调用。赋值后的 rematerialize 可能把一个结果转换改成多个输入转换，覆盖
+solver 已计分的 layout 分配；这类取舍应由 solver 的候选和评分决定。
+赋值前的 `vmi-layout-rematerialize-weak-producers` 是独立的准备步骤。
+
+物理评分按 `(total, memoryTotal, coupling, ...)` 比较：`total` 统计已核实的
+计算和重排动作，包含 op 内部的 intrinsic rearrangement；打平后再比较
+访存 action 数。两者均使用相同的循环次数权重，但不把一次访存当成与一次
+算术或 shuffle 等价的 latency 权重。次级 coupling 数也包含内部重排。
+例如重排成本相同的方案中，一次 dense store 优于多次 lane-strided store。
+group reduction 的独立结果寄存器不组成 packing tree，不能仅按结果数量
+虚构重排成本。归约算术按 support fact 对应的 lowering 结构计分：native 路径
+统计每个输入 carrier 的 VCG 及各结果 packet 的合并；dense 行路径统计
+group 与 carrier 的交集，每个交集执行一次行归约，额外 partial 执行一次合并。
+slots=1 独立结果没有隐含 packing；compact packet 的额外 slot 计入 Vdup/Vsel。
+单结果逐 carrier 算术与 lowering 共用 `VMICarrierWiseArithmetic.def`，每个
+结果 carrier 执行一条数据算术指令。评分扣除该 op 在所有候选中相同的 dense
+基线，只计 layout 导致的额外副本；因此候选间分差等于实际指令数之差，
+不能只给 `vabs` 的副本收费，却漏掉 `vmul/vsub` 等同类工作。
+整数与浮点 widening 统一按每个结果 carrier 一次原生 VCVT 计入主成本；
+若 relation 已通过 intrinsic rearrangement 计入替代转换的 shuffle，
+则结果仅是物理视图，不再重复计入 VCVT。例如 BF16 同 layout widening
+计 VINTLV，整数 group-slot unpack widening 计实际 unpack。
+
+结构布局等式与执行依赖分别处理：CFG 回边仍参与布局等价类和最终一致性校验，
+但当目标块支配源 producer 所在块时，不把该传输加入本轮操作的拓扑依赖。
+同宽数值 cast 从显式源、显式结果和组件候选枚举同布局关系，使用
+`getSameWidthCastLayoutFact` 验证相同存储位宽与物理 arity；候选补齐不改变评分权重。
+共享常量、谓词和 view 不属于这条逐 carrier 数据算术规则；复合与多结果操作
+需要独立的 lowering 结构记账，不能按结果个数套用一条原生算术指令。
+谓词建立、寄存器依赖和流水延迟尚未构成完整硬件时序模型。
+评分不依赖测试名称或 shape 特判，也不在赋值后通过 remat/sink 改写选择。
 
 Only `vmi-layout-assignment` is required for the first legal implementation.
 The optimization passes may be introduced one by one.  Their contract is that

@@ -8,6 +8,11 @@
 
 
 // RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o - | FileCheck %s
+// RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-mask-granularity-assignment -vmi-layout-assignment -vmi-to-vpto | FileCheck %s
+
+// Compact broadcasts may produce fewer logical lanes than one physical carrier.
+// The planner must retain the support table's contiguous result relations so
+// both the default pipeline and direct layout assignment reach selector lowering.
 
 module {
   func.func @compact_broadcast_i8_1_1(%src: !pto.ptr<i8, ub>, %dst: !pto.ptr<i8, ub>) {

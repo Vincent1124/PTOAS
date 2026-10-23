@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt %s -vmi-to-vpto | FileCheck %s
+
+module {
+  func.func @block_mask_is_not_contiguous(
+      %input: !pto.vmi.mask<256xb32, #pto.vmi.layout<block_deinterleaved = 4>>) -> !pto.vmi.mask<256xb32, #pto.vmi.layout<contiguous>> {
+    %dense = pto.vmi.ensure_mask_layout %input
+        : !pto.vmi.mask<256xb32, #pto.vmi.layout<block_deinterleaved = 4>>
+        -> !pto.vmi.mask<256xb32, #pto.vmi.layout<contiguous>>
+    return %dense : !pto.vmi.mask<256xb32, #pto.vmi.layout<contiguous>>
+  }
+
+  func.func @block_mask_factor2_to_contiguous(%input: !pto.vmi.mask<128xb32, #pto.vmi.layout<block_deinterleaved = 2>>) -> !pto.vmi.mask<128xb32, #pto.vmi.layout<contiguous>> {
+    %result = pto.vmi.ensure_mask_layout %input : !pto.vmi.mask<128xb32, #pto.vmi.layout<block_deinterleaved = 2>> -> !pto.vmi.mask<128xb32, #pto.vmi.layout<contiguous>>
+    return %result : !pto.vmi.mask<128xb32, #pto.vmi.layout<contiguous>>
+  }
+
+  func.func @block_mask_factor2_from_contiguous(%input: !pto.vmi.mask<128xb32, #pto.vmi.layout<contiguous>>) -> !pto.vmi.mask<128xb32, #pto.vmi.layout<block_deinterleaved = 2>> {
+    %result = pto.vmi.ensure_mask_layout %input : !pto.vmi.mask<128xb32, #pto.vmi.layout<contiguous>> -> !pto.vmi.mask<128xb32, #pto.vmi.layout<block_deinterleaved = 2>>
+    return %result : !pto.vmi.mask<128xb32, #pto.vmi.layout<block_deinterleaved = 2>>
+  }
+
+  func.func @block_mask_factor4_from_contiguous(%input: !pto.vmi.mask<256xb32, #pto.vmi.layout<contiguous>>) -> !pto.vmi.mask<256xb32, #pto.vmi.layout<block_deinterleaved = 4>> {
+    %result = pto.vmi.ensure_mask_layout %input : !pto.vmi.mask<256xb32, #pto.vmi.layout<contiguous>> -> !pto.vmi.mask<256xb32, #pto.vmi.layout<block_deinterleaved = 4>>
+    return %result : !pto.vmi.mask<256xb32, #pto.vmi.layout<block_deinterleaved = 4>>
+  }
+}
+
+// CHECK-LABEL: func.func @block_mask_is_not_contiguous(
+// CHECK: pto.vsel
+// CHECK: pto.vselr
+// CHECK: pto.vcmps
+// CHECK: pto.vsel
+// CHECK: pto.vcmps
+// CHECK-NOT: pto.vmi.
+// CHECK-NOT: unrealized_conversion_cast
+
+// CHECK-LABEL: func.func @block_mask_factor2_to_contiguous(
+// CHECK-COUNT-4: pto.vselr
+// CHECK: pto.vcmps
+// CHECK-NOT: pto.vmi.
+// CHECK-NOT: unrealized_conversion_cast
+// CHECK: return
+
+// CHECK-LABEL: func.func @block_mask_factor2_from_contiguous(
+// CHECK-COUNT-4: pto.vselr
+// CHECK: pto.vcmps
+// CHECK-NOT: pto.vmi.
+// CHECK-NOT: unrealized_conversion_cast
+// CHECK: return
+
+// CHECK-LABEL: func.func @block_mask_factor4_from_contiguous(
+// CHECK-COUNT-16: pto.vselr
+// CHECK: pto.vcmps
+// CHECK-NOT: pto.vmi.
+// CHECK-NOT: unrealized_conversion_cast
+// CHECK: return

@@ -56,8 +56,11 @@ def build_kernel(dtype, lanes, groups, itemsize, name):
         pto.pipe_barrier(pto.Pipe.ALL)
 
     kernel.__name__ = name
+    # This graph exceeds the default frontier of 288; keep other kernels on it.
+    ptoas_flags = (("--vmi-layout-max-frontier-entries=512",)
+                  if dtype == pto.i16 and (lanes, groups) == (8, 1) else ())
     return pto.jit(name=name, target="a5", backend="vpto", mode="explicit",
-                   kernel_kind="vector", insert_sync=False)(kernel)
+                   kernel_kind="vector", insert_sync=False, ptoas_flags=ptoas_flags)(kernel)
 
 
 def source_values(dtype, edges):

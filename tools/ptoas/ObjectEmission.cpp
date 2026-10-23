@@ -758,7 +758,8 @@ static bool runCommandWithStderr(llvm::StringRef program,
 // VF auto-sync and fastmath selections the driver resolved.
 static llvm::SmallVector<std::string, mlir::pto::kValue24>
 buildDeviceCompileArgs(llvm::StringRef targetCPU, llvm::StringRef bishengPath,
-                       bool needsPrintSupport) {
+                       bool needsPrintSupport, bool hasBlockStridedMemory)
+{
     llvm::SmallVector<std::string, mlir::pto::kValue24> args = {
         bishengPath.str(),
         std::string("--cce-aicore-arch=") + targetCPU.str(),
@@ -787,6 +788,11 @@ buildDeviceCompileArgs(llvm::StringRef targetCPU, llvm::StringRef bishengPath,
     }
     args.push_back("-mllvm");
     args.push_back(std::string("--cce-simt-fpmath-combine=") + (enableSimtFastMath ? "true" : "false"));
+    if (hasBlockStridedMemory) {
+        // CANN's VF load/store elimination can merge a dense load with a
+        // block-strided load from the same UB base while ignoring its stride.
+        args.append({"-mllvm", "--cce-vf-enable-vf-ldst-elimination=false"});
+    }
     if (needsPrintSupport) {
         appendCcePrintFlags(args);
     }
@@ -796,9 +802,10 @@ buildDeviceCompileArgs(llvm::StringRef targetCPU, llvm::StringRef bishengPath,
 static bool compileDeviceLLVMToObject(
     llvm::StringRef llPath, llvm::StringRef outObjPath, llvm::StringRef targetCPU, llvm::StringRef bishengPath,
     llvm::StringRef stderrPath, llvm::raw_ostream& diagOS, mlir::pto::BishengSchedulerMode schedulerMode,
-    bool needsPrintSupport = false)
+    bool needsPrintSupport = false, bool hasBlockStridedMemory = false)
 {
-    const auto args = buildDeviceCompileArgs(targetCPU, bishengPath, needsPrintSupport);
+    const auto args = buildDeviceCompileArgs(
+        targetCPU, bishengPath, needsPrintSupport, hasBlockStridedMemory);
     auto compile = [&args, bishengPath, llPath](
                        bool enabled, bool reportUsage, llvm::StringRef object, llvm::StringRef log,
                        llvm::raw_ostream& diagnostics) {
@@ -1379,7 +1386,12 @@ static mlir::LogicalResult emitVPTODeviceObject(
   const bool compiled = compileDeviceLLVMToObject(
       compileInput, outObjPath, resolveTargetCPU(module, target),
       toolchain.bishengPath, stderrPath, diagOS, schedulerMode,
-      printMode != mlir::pto::PrintDTDataMode::None);
+      printMode != mlir::pto::PrintDTDataMode::None,
+      llvm::any_of(module, [](const llvm::Function &function) {
+        return !function.use_empty() &&
+               (function.getName().starts_with("llvm.hivm.vsldb.") ||
+                function.getName().starts_with("llvm.hivm.vsstb."));
+      }));
   return compiled ? mlir::success() : mlir::failure();
 }
 

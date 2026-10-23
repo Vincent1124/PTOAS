@@ -232,6 +232,32 @@ inline bool matchesMaskGranularityPattern(MaskGranularityPattern pattern,
   return mask != 0 && (pattern.mask & mask) != 0;
 }
 
+/// Bit width named by a concrete mask granularity, 0 when the granularity names
+/// no physical predicate carrier of its own.
+inline int64_t getMaskGranularityBits(StringRef granularity)
+{
+    return granularity == "b8"  ? mlir::pto::kValue8 :
+           granularity == "b16" ? mlir::pto::kValue16 :
+           granularity == "b32" ? mlir::pto::kValue32 :
+                                  0;
+}
+
+/// Inverse of getMaskGranularityBits: the granularity that names a physical
+/// predicate carrier of \p bits, empty when no such carrier exists.
+inline StringRef getMaskGranularityNameForBits(int64_t bits)
+{
+    switch (bits) {
+        case mlir::pto::kValue8:
+            return "b8";
+        case mlir::pto::kValue16:
+            return "b16";
+        case mlir::pto::kValue32:
+            return "b32";
+        default:
+            return "";
+    }
+}
+
 inline VMILayoutAttr materializeLayoutPattern(MLIRContext *ctx,
                                               LayoutPattern pattern,
                                               int64_t numGroups = 0) {

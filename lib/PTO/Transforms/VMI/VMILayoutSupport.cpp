@@ -35,13 +35,17 @@
 #include "PTO/Transforms/VMILayoutSupport.h"
 
 #include "PTO/Support/CodeConstants.h"
+#include "PTO/Analysis/PTOAddressAnalysis.h"
 #include "PTO/IR/PTOTypeUtils.h"
 #include "PTO/IR/VMIUtils.h"
+#include "PTO/IR/VPTOMemoryDist.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/CommandLine.h"
+
+#include <limits>
 
 namespace mlir {
 namespace pto {
@@ -93,6 +97,10 @@ static llvm::cl::opt<bool> preferLaneStrideNarrowing(
 #include "VMILayoutSupportTables.inc"
 #include "VMILayoutSupportGroupBroadcastTables.inc"
 #include "VMILayoutSupportSpineTables.inc"
+// The solver-cost unit defines the physical predicate-carrier helpers the
+// vexpdif physical-shape matcher in the materialization unit reads, so it is
+// included first.
+#include "VMILayoutSupportSolverCosts.inc"
 #include "VMILayoutSupportMaterialization.inc"
 } // namespace
 
@@ -376,96 +384,61 @@ VMILayoutSupport::getGroupReduceLayoutFactForLayouts(
               "layout table row for the group size");
 }
 
-/// Whether the shared ensure_layout table can turn a contiguous value of this
-/// shape into nativeLayout.  A native grouped-reduction row is reachable
-/// from a contiguous source only when such a row exists, so the dense fallback
-/// must not answer for the contiguous form when one does: doing so anchors the
-/// result to the dense slots=1 output while the operand still asks for the
-/// native source, which the layout contract then rejects.
-static bool hasContiguousToNativeEnsureBridge(VMIVRegType sourceType,
-                                              VMILayoutAttr nativeLayout) {
-  if (!nativeLayout || nativeLayout.isContiguous()) {
-    return false;
-  }
-  MLIRContext *ctx = sourceType.getContext();
-  VMILayoutAttr contiguous = VMILayoutAttr::getContiguous(ctx);
-  auto contiguousType = VMIVRegType::get(ctx, sourceType.getElementCount(),
-                                         sourceType.getElementType(), contiguous);
-  auto nativeType = VMIVRegType::get(ctx, sourceType.getElementCount(),
-                                     sourceType.getElementType(), nativeLayout);
-  VMILayoutSupport supports;
-  return succeeded(supports.getEnsureLayoutFact(contiguousType, nativeType));
-}
-
 FailureOr<SmallVector<VMIGroupReduceLayoutFact, mlir::pto::kValue4>>
 VMILayoutSupport::getGroupReduceLayoutFactsForLayout(
-    VMIGroupReduceKind kind, VMIVRegType sourceType, int64_t numGroups,
-    VMIGroupReduceLayoutPort port, VMILayoutAttr layout,
-    std::string *reason) const {
-  auto fail = [reason](const Twine &message)
-      -> FailureOr<SmallVector<VMIGroupReduceLayoutFact, 4>> {
-    if (reason) {
-      *reason = message.str();
-    }
-    return failure();
-  };
+    VMIGroupReduceKind kind, VMIVRegType sourceType, int64_t numGroups, VMIGroupReduceLayoutPort port,
+    VMILayoutAttr layout, std::string* reason) const
+{
+    auto fail = [reason](const Twine& message) -> FailureOr<SmallVector<VMIGroupReduceLayoutFact, 4>> {
+        if (reason) {
+            *reason = message.str();
+        }
+        return failure();
+    };
 
-  if (!layout) {
-    return fail("requires assigned group_reduce layout query port");
-  }
-
-  FailureOr<GroupLayoutKey> key = buildGroupReduceLayoutKey(
-      sourceType, numGroups,
-      "group_reduce layout table has no row for this group size", reason);
-  if (failed(key)) {
-    return failure();
-  }
-
-  SmallVector<VMIGroupReduceLayoutFact, mlir::pto::kValue4> facts;
-  bool hasBridgeableNative = false;
-  for (const GroupReduceLayoutPattern &pattern : kGroupReduceLayoutPatterns) {
-    if (!matchesGroupBlockPattern(pattern.block, *key) ||
-        !isExecutableGroupReducePattern(pattern, *key)) {
-      continue;
-    }
-    VMIGroupReduceLayoutFact candidate = materializeGroupReduceLayoutFact(
-        sourceType.getContext(), pattern, *key, numGroups, kind,
-        sourceType.getElementType());
-
-    // A native source the ensure_layout table can bridge from the contiguous
-    // form is a real alternative to the dense fallback.  Remember it so the
-    // dense fallback does not make the contiguous layout look acceptable and
-    // pin the result to the dense slots=1 output.
-    if (hasContiguousToNativeEnsureBridge(sourceType, candidate.sourceLayout)) {
-      hasBridgeableNative = true;
+    if (!layout) {
+        return fail("requires assigned group_reduce layout query port");
     }
 
-    VMILayoutAttr candidateLayout = groupReduceLayoutForPort(candidate, port);
-    if (candidateLayout == layout) {
-      facts.push_back(candidate);
+    FailureOr<GroupLayoutKey> key = buildGroupReduceLayoutKey(
+        sourceType, numGroups, "group_reduce layout table has no row for this group size", reason);
+    if (failed(key)) {
+        return failure();
     }
-  }
 
-  VMIGroupReduceLayoutFact dense =
-      makeDenseRowsGroupReduceFact(sourceType.getContext(), *key, numGroups);
-  VMILayoutAttr denseLayout = groupReduceLayoutForPort(dense, port);
-  // The dense fallback exists only for shapes the table cannot describe.  If a
-  // table row already provides this port layout, adding the fallback as a second
-  // fact would make the layout assignment treat the result as weakly seeded and
-  // let a contiguous source drift into a deinterleaved form (and back again).
-  // Likewise, a bridgeable native row must not be shadowed by the fallback just
-  // because the operand happens to still be contiguous.
-  const bool denseFallbackApplies =
-      denseLayout == layout && facts.empty() && !hasBridgeableNative;
-  if (denseFallbackApplies) {
-    facts.push_back(dense);
-  }
+    SmallVector<VMIGroupReduceLayoutFact, mlir::pto::kValue4> facts;
+    for (const GroupReduceLayoutPattern& pattern : kGroupReduceLayoutPatterns) {
+        if (!matchesGroupBlockPattern(pattern.block, *key) || !isExecutableGroupReducePattern(pattern, *key)) {
+            continue;
+        }
+        VMIGroupReduceLayoutFact candidate = materializeGroupReduceLayoutFact(
+            sourceType.getContext(), pattern, *key, numGroups, kind, sourceType.getElementType());
 
-  if (facts.empty()) {
-    return fail("group_reduce layout query port does not match a legal layout "
-                "table row for the group size");
-  }
-  return facts;
+        VMILayoutAttr candidateLayout = groupReduceLayoutForPort(candidate, port);
+        if (candidateLayout == layout) {
+            facts.push_back(candidate);
+        }
+    }
+
+    VMIGroupReduceLayoutFact dense = makeDenseRowsGroupReduceFact(sourceType.getContext(), *key, numGroups);
+    VMILayoutAttr denseLayout = groupReduceLayoutForPort(dense, port);
+    // The dense fallback exists only for shapes the table cannot describe.  If a
+    // table row already provides this port layout, adding the fallback as a second
+    // fact would make the layout assignment treat the result as weakly seeded and
+    // let a contiguous source drift into a deinterleaved form (and back again).
+    // A bridgeable native row does not remove the dense contiguous alternative.
+    // The conflict solver prices complete relations and must be able to compare
+    // the dense reduction against materializing a native source layout.
+    const bool denseFallbackApplies = denseLayout == layout && facts.empty();
+    if (denseFallbackApplies) {
+        facts.push_back(dense);
+    }
+
+    if (facts.empty()) {
+        return fail("group_reduce layout query port does not match a legal layout "
+                    "table row for the group size");
+    }
+    return facts;
 }
 
 FailureOr<VMIGroupBroadcastLayoutFact>
@@ -737,14 +710,30 @@ static void collectMatchingCastFacts(
     if (!sourceLayout || !resultLayout) {
       continue;
     }
+    // Component candidates may carry another value's group count. A cast
+    // relation must describe one logical lane per group on both ports before
+    // constructing the physical types used to price it.
+    if ((sourceLayout.isGroupSlots() && sourceLayout.getNumGroups() != sourceType.getElementCount()) ||
+        (resultLayout.isGroupSlots() && resultLayout.getNumGroups() != resultType.getElementCount())) {
+        continue;
+    }
     if (port == VMICastLayoutPort::Source && sourceLayout != layout) {
       continue;
     }
     if (port == VMICastLayoutPort::Result && resultLayout != layout) {
       continue;
     }
-    facts.push_back(
-        makeCastLayoutFact(sourceBits, resultBits, sourceLayout, resultLayout));
+    VMICastLayoutFact fact = makeCastLayoutFact(sourceBits, resultBits, sourceLayout, resultLayout);
+    // The intrinsic cost is best effort: this funnel defines which relations are
+    // legal, and a row whose cost cannot be derived is still legal.  Dropping it
+    // here would narrow the candidate set of every caller, including upstream's
+    // own layout decisions, so the row is kept and the cost left at its default
+    // until the fork-side enumeration filters unpriced rows itself.
+    if (auto intrinsicCost = getCastIntrinsicRearrangementCost(sourceType, resultType, sourceLayout, resultLayout);
+        succeeded(intrinsicCost)) {
+        fact.intrinsicRearrangementCost = *intrinsicCost;
+    }
+    facts.push_back(fact);
   }
 }
 
@@ -830,29 +819,22 @@ getHighPriorityCastLayoutFactImpl(VMIVRegType sourceType,
   return *selected;
 }
 
-static int64_t getMaskGranularityBits(StringRef granularity) {
-  if (granularity == "b8") {
-    return mlir::pto::kValue8;
-  }
-  if (granularity == "b16") {
-    return mlir::pto::kValue16;
-  }
-  if (granularity == "b32") {
-    return mlir::pto::kValue32;
-  }
-  return 0;
-}
-
-static VMIMaskGranularityCastLayoutFact
-makeMaskGranularityCastLayoutFact(int64_t sourceBits, int64_t resultBits,
-                                  VMILayoutAttr sourceLayout,
-                                  VMILayoutAttr resultLayout) {
-  VMIMaskGranularityCastLayoutFact fact;
-  fact.sourceGranularityBits = sourceBits;
-  fact.resultGranularityBits = resultBits;
-  fact.sourceLayout = sourceLayout;
-  fact.resultLayout = resultLayout;
-  return fact;
+static VMIMaskGranularityCastLayoutFact makeMaskGranularityCastLayoutFact(
+    VMIMaskType sourceType, VMIMaskType resultType, int64_t sourceBits, int64_t resultBits, VMILayoutAttr sourceLayout,
+    VMILayoutAttr resultLayout)
+{
+    VMIMaskGranularityCastLayoutFact fact;
+    fact.sourceGranularityBits = sourceBits;
+    fact.resultGranularityBits = resultBits;
+    fact.sourceLayout = sourceLayout;
+    fact.resultLayout = resultLayout;
+    // Best effort for the same reason as in collectMatchingCastFacts: an
+    // underivable cost must not remove a legal granularity relation.
+    if (auto intrinsicCost = getMaskGranularityIntrinsicCost(sourceType, resultType, sourceLayout, resultLayout);
+        succeeded(intrinsicCost)) {
+        fact.intrinsicRearrangementCost = *intrinsicCost;
+    }
+    return fact;
 }
 
 struct PreferredCastPatternQuery {
@@ -1238,7 +1220,7 @@ VMILayoutSupport::getMaskGranularityCastLayoutFactsForLayout(
     }
 
     facts.push_back(makeMaskGranularityCastLayoutFact(
-        query->sourceBits, query->resultBits, sourceLayout, resultLayout));
+        sourceType, resultType, query->sourceBits, query->resultBits, sourceLayout, resultLayout));
   }
 
   if (facts.empty()) {
@@ -1978,7 +1960,19 @@ FailureOr<VMIEnsureLayoutFact> VMILayoutSupport::getEnsureLayoutFact(
                                       resultLayout, reason))) {
     return failure();
   }
-  return VMIEnsureLayoutFact{sourceLayout, resultLayout};
+  // A conversion that selects the same physical parts on both sides forwards
+  // the register untouched.  Two such families exist: the identity pair, and a
+  // one-element dense value against the single group slot that names the same
+  // sole carrier lane.  Everything else rearranges lanes and is charged as
+  // such by the cost model.
+  bool oneLaneContiguousToGroup = sourceType.getElementCount() == 1 && sourceLayout.isContiguous() &&
+                                  sourceLayout.getLaneStride() == 1 && resultLayout.isGroupSlots() &&
+                                  resultLayout.getNumGroups() == 1 && resultLayout.getSlots() == 1;
+  bool oneLaneGroupToContiguous = sourceType.getElementCount() == 1 && sourceLayout.isGroupSlots() &&
+                                  sourceLayout.getNumGroups() == 1 && sourceLayout.getSlots() == 1 &&
+                                  resultLayout.isContiguous() && resultLayout.getLaneStride() == 1;
+  return VMIEnsureLayoutFact{
+      sourceLayout, resultLayout, sourceLayout == resultLayout || oneLaneContiguousToGroup || oneLaneGroupToContiguous};
 }
 
 FailureOr<VMIEnsureMaskLayoutFact> VMILayoutSupport::getEnsureMaskLayoutFact(
@@ -1989,300 +1983,11 @@ FailureOr<VMIEnsureMaskLayoutFact> VMILayoutSupport::getEnsureMaskLayoutFact(
                                           resultLayout, reason))) {
     return failure();
   }
-  return VMIEnsureMaskLayoutFact{sourceLayout, resultLayout};
+  return VMIEnsureMaskLayoutFact{sourceLayout, resultLayout, sourceLayout == resultLayout};
 }
 
-FailureOr<VMIGroupSlotLayoutFact> VMILayoutSupport::getGroupSlotLoadLayoutFact(
-    VMIVRegType resultType, int64_t numGroups, std::string *reason) const {
-  auto fail =
-      [reason](const Twine &message) -> FailureOr<VMIGroupSlotLayoutFact> {
-    if (reason) {
-      *reason = message.str();
-    }
-    return failure();
-  };
+#include "VMILayoutSupportGroupMemoryQueries.inc"
 
-  VMILayoutAttr layout = resultType.getLayoutAttr();
-  if (!layout) {
-    return fail("requires assigned result layout");
-  }
-
-  if (!isSupportedGroupSlotMemoryLayout(layout, numGroups)) {
-    return fail("result layout does not match a supported group_slot_load "
-                "table row");
-  }
-
-  return VMIGroupSlotLayoutFact{layout, numGroups, layout.getSlots()};
-}
-
-FailureOr<VMIGroupLoadLayoutFact>
-VMILayoutSupport::getGroupLoadLayoutFact(VMIGroupLoadOp op,
-                                         std::string *reason) const {
-  return getGroupLoadLayoutFact(cast<VMIVRegType>(op.getResult().getType()),
-                                op.getRowStride(),
-                                op.getNumGroupsAttr().getInt(), reason);
-}
-
-FailureOr<VMIGroupLoadLayoutFact> VMILayoutSupport::getGroupLoadLayoutFact(
-    VMIVRegType resultType, Value rowStride, int64_t numGroups,
-    std::string *reason) const {
-  auto fail =
-      [reason](const Twine &message) -> FailureOr<VMIGroupLoadLayoutFact> {
-    if (reason) {
-      *reason = message.str();
-    }
-    return failure();
-  };
-
-  VMILayoutAttr layout = resultType.getLayoutAttr();
-  if (!layout) {
-    return fail("requires assigned result layout");
-  }
-
-  unsigned elementBits =
-      pto::getPTOStorageElemBitWidth(resultType.getElementType());
-  if (elementBits == 0) {
-    return fail("group_load requires known element bit width");
-  }
-  std::optional<int64_t> stride = getConstantIndexValue(rowStride);
-
-  FailureOr<GroupLayoutKey> key = buildGroupLayoutKey(
-      resultType, numGroups,
-      "group_load layout table has no row for this group size", reason);
-  if (failed(key)) {
-    return failure();
-  }
-
-  for (const GroupLoadLayoutPattern &pattern : kGroupLoadLayoutPatterns) {
-    if (!matchesElementBitsPattern(pattern.elementBits, elementBits)) {
-      continue;
-    }
-    if (!matchesGroupBlockPattern(pattern.block, *key)) {
-      continue;
-    }
-    if (!matchesGroupLoadMemoryPattern(pattern.memory, stride, key->groupSize,
-                                       elementBits)) {
-      continue;
-    }
-    if (!matchesLayoutPattern(resultType.getContext(), pattern.resultLayout,
-                              layout)) {
-      continue;
-    }
-    return VMIGroupLoadLayoutFact{
-        getGroupBlockClassFromPattern(pattern.block), layout, key->groupSize};
-  }
-
-  return fail("result layout, group size, and row_stride do not match a "
-              "supported group_load table row");
-}
-
-FailureOr<VMIGroupSlotLayoutFact> VMILayoutSupport::getGroupStoreLayoutFact(
-    VMIVRegType valueType, int64_t numGroups, std::string *reason) const {
-  auto fail =
-      [reason](const Twine &message) -> FailureOr<VMIGroupSlotLayoutFact> {
-    if (reason) {
-      *reason = message.str();
-    }
-    return failure();
-  };
-
-  VMILayoutAttr layout = valueType.getLayoutAttr();
-  if (!layout) {
-    return fail("requires assigned value layout");
-  }
-  if (!isSupportedGroupSlotMemoryLayout(layout, numGroups)) {
-    return fail("value layout does not match a supported group_store table "
-                "row");
-  }
-  return VMIGroupSlotLayoutFact{layout, numGroups, layout.getSlots()};
-}
-
-FailureOr<VMIGroupStoreLayoutFact> VMILayoutSupport::getGroupStoreLayoutFact(
-    VMIGroupStoreOp op, VMIVRegType valueType, std::string *reason) const {
-  auto fail =
-      [reason](const Twine &message) -> FailureOr<VMIGroupStoreLayoutFact> {
-    if (reason) {
-      *reason = message.str();
-    }
-    return failure();
-  };
-
-  VMILayoutAttr layout = valueType.getLayoutAttr();
-  if (!layout) {
-    return fail("requires assigned value layout");
-  }
-
-  int64_t numGroups = op.getNumGroupsAttr().getInt();
-  if (layout.isGroupSlots()) {
-    if (failed(getGroupStoreLayoutFact(valueType, numGroups, reason))) {
-      return failure();
-    }
-    return VMIGroupStoreLayoutFact{layout};
-  }
-
-  if (pto::getPTOStorageElemBitWidth(valueType.getElementType()) == 0) {
-    return fail("group_store requires known element bit width");
-  }
-
-  FailureOr<GroupLayoutKey> key = buildGroupLayoutKey(
-      valueType, numGroups,
-      "group_store layout table has no row for this group size", reason);
-  if (failed(key)) {
-    return failure();
-  }
-
-  std::optional<int64_t> rowStride =
-      getConstantIndexValue(op.getRowStride());
-  for (const GroupStoreLayoutPattern &pattern : kGroupStoreLayoutPatterns) {
-    if (!matchesGroupStoreLayoutPattern(pattern, valueType, *key, rowStride)) {
-      continue;
-    }
-    if (!matchesLayoutPattern(valueType.getContext(), pattern.valueLayout,
-                              layout)) {
-      continue;
-    }
-    VMIGroupStoreLayoutFact fact =
-        materializeGroupStoreLayoutFact(valueType.getContext(), pattern, *key);
-    fact.valueLayout = layout;
-    return fact;
-  }
-
-  return fail("value layout, group size, and row_stride do not match a "
-              "supported group_store table row");
-}
-
-
-FailureOr<SmallVector<VMIGroupStoreLayoutFact, mlir::pto::kValue4>>
-VMILayoutSupport::getGroupStoreLayoutFactsForLayout(
-    VMIGroupStoreOp op, VMIVRegType valueType, VMILayoutAttr layout,
-    std::string *reason) const {
-  auto fail = [reason](const Twine &message)
-      -> FailureOr<SmallVector<VMIGroupStoreLayoutFact, 4>> {
-    if (reason) {
-      *reason = message.str();
-    }
-    return failure();
-  };
-
-  if (!layout) {
-    return fail("requires assigned group_store value layout");
-  }
-
-  MLIRContext *ctx = valueType.getContext();
-  auto sourceType = VMIVRegType::get(ctx, valueType.getElementCount(),
-                                    valueType.getElementType(), layout);
-  FailureOr<VMIGroupStoreLayoutFact> directFact =
-      getGroupStoreLayoutFact(op, sourceType, nullptr);
-  if (succeeded(directFact)) {
-    return SmallVector<VMIGroupStoreLayoutFact, mlir::pto::kValue4>{*directFact};
-  }
-
-  FailureOr<GroupLayoutKey> key = buildGroupLayoutKey(
-      valueType, op.getNumGroupsAttr().getInt(),
-      "group_store layout table has no row for this group size", reason);
-  if (failed(key)) {
-    return failure();
-  }
-
-  std::optional<int64_t> rowStride =
-      getConstantIndexValue(op.getRowStride());
-  SmallVector<VMIGroupStoreLayoutFact, mlir::pto::kValue4> facts;
-  appendMaterializableGroupStoreFacts(
-      *this, {valueType, sourceType, *key, rowStride}, facts);
-
-  if (facts.empty()) {
-    return fail("value layout cannot be used directly or materialized to a "
-                "supported group_store layout table row");
-  }
-  return facts;
-}
-
-FailureOr<VMIGroupStoreLayoutFact>
-VMILayoutSupport::getPreferredGroupStoreLayoutFact(
-    VMIGroupStoreOp op, VMIVRegType valueType, std::string *reason) const {
-  auto fail =
-      [reason](const Twine &message) -> FailureOr<VMIGroupStoreLayoutFact> {
-    if (reason) {
-      *reason = message.str();
-    }
-    return failure();
-  };
-
-  int64_t numGroups = op.getNumGroupsAttr().getInt();
-  std::optional<VMIGroupStoreLayoutFact> slotFact =
-      getPreferredGroupSlotStoreFact(*this, op, valueType, numGroups);
-  if (slotFact) {
-    return *slotFact;
-  }
-
-  if (pto::getPTOStorageElemBitWidth(valueType.getElementType()) == 0) {
-    return fail("group_store requires known element bit width");
-  }
-  FailureOr<GroupLayoutKey> key = buildGroupLayoutKey(
-      valueType, numGroups,
-      "group_store preferred layout table has no row for this group size",
-      reason);
-  if (failed(key)) {
-    return failure();
-  }
-
-  std::optional<int64_t> rowStride =
-      getConstantIndexValue(op.getRowStride());
-  const GroupStoreLayoutPattern *selected =
-      selectPreferredGroupStorePattern(valueType, *key, rowStride);
-  if (selected) {
-    return materializeGroupStoreLayoutFact(valueType.getContext(), *selected,
-                                           *key);
-  }
-
-  return fail("value type, group size, and row_stride do not match a "
-              "preferred group_store table row");
-}
-
-FailureOr<VMIGroupStoreLayoutFact>
-VMILayoutSupport::getHighPriorityGroupStoreLayoutFact(
-    VMIGroupStoreOp op, VMIVRegType valueType, std::string *reason) const {
-  auto fail =
-      [reason](const Twine &message) -> FailureOr<VMIGroupStoreLayoutFact> {
-    if (reason) {
-      *reason = message.str();
-    }
-    return failure();
-  };
-
-  if (pto::getPTOStorageElemBitWidth(valueType.getElementType()) == 0) {
-    return fail("group_store requires known element bit width");
-  }
-  FailureOr<GroupLayoutKey> key = buildGroupLayoutKey(
-      valueType, op.getNumGroupsAttr().getInt(),
-      "high-priority group_store layout table has no row for this group size",
-      reason);
-  if (failed(key)) {
-    return failure();
-  }
-
-  std::optional<int64_t> rowStride =
-      getConstantIndexValue(op.getRowStride());
-  for (const GroupStoreLayoutPattern &pattern : kGroupStoreLayoutPatterns) {
-    if (pattern.priority != GroupStoreLayoutPriority::High) {
-      continue;
-    }
-    if (!matchesGroupStoreLayoutPattern(pattern, valueType, *key, rowStride)) {
-      continue;
-    }
-    VMIGroupStoreLayoutFact fact = materializeGroupStoreLayoutFact(
-        valueType.getContext(), pattern, *key);
-    if (!fact.valueLayout) {
-      continue;
-    }
-    return fact;
-  }
-
-  return fail("value type, group size, and row_stride do not match a "
-              "high-priority group_store table row");
-}
-
-template <typename OpTy>
 static FailureOr<VMIHistogramLayoutFact>
 getHistogramLayoutFactImpl(OpTy op, ArrayRef<HistogramLayoutPattern> patterns,
                            StringRef opName, std::string *reason) {
@@ -2358,10 +2063,50 @@ VMILayoutSupport::getVchistSupport(VMIVchistOp op, std::string *reason) const {
 }
 
 // Textual include units that keep this file under the source-size gate: the
-// width-changing bitcast queries and the direction-spine-scoped cast layout
-// queries.
+// width-changing bitcast queries, the direction-spine-scoped cast layout
+// queries, the op-qualified relation support queries the layout cost model
+// reads, the vexpdif layout queries, and the candidate-enumerating queries the
+// costed layout solver drives.
 #include "VMILayoutSupportBitcast.inc"
 #include "VMILayoutSupportSpineScoped.inc"
+#include "VMILayoutSupportRelationQueries.inc"
+#include "VMILayoutSupportVexpdifQueries.inc"
+#include "VMILayoutSupportSolverQueries.inc"
+
+//===----------------------------------------------------------------------===//
+// Direct memory-dist address legality
+
+// Shared by the lowering and the cost model: both must answer "can this access
+// use the family+token directly at this address?" the same way.  The lowering
+// gained the address precondition when the direct forms were introduced; the
+// cost model has to ask this question rather than re-derive the answer from the
+// shape of the value, or the two drift apart.
+//===----------------------------------------------------------------------===//
+
+/// Physical byte size of a register carrier, or nothing when the element width is
+/// unknown or the byte size is not exact.
+static std::optional<int64_t> getPhysicalVectorBytes(VRegType type)
+{
+    unsigned elementBits = pto::getPTOStorageElemBitWidth(type.getElementType());
+    int64_t totalBits;
+    if (elementBits == 0 || llvm::MulOverflow(type.getElementCount(), static_cast<int64_t>(elementBits), totalBits) ||
+        totalBits <= 0 || totalBits % kVMIBitsPerByte != 0) {
+        return std::nullopt;
+    }
+    return totalBits / kVMIBitsPerByte;
+}
+
+bool isDirectMemoryDistAddressLegal(
+    Value base, Value offset, Type addressElementType, VRegType registerType, VPTOMemoryOpFamily family, StringRef dist)
+{
+    unsigned registerElementBits = pto::getPTOStorageElemBitWidth(registerType.getElementType());
+    const VPTOMemoryDistContract* contract = lookupVPTOMemoryDist(
+        family, dist, registerElementBits == 0 ? std::nullopt : std::optional<unsigned>(registerElementBits));
+    std::optional<int64_t> vectorBytes = getPhysicalVectorBytes(registerType);
+    std::optional<int64_t> requiredAlignment =
+        contract && vectorBytes ? contract->getRequiredAlignmentBytes(*vectorBytes) : std::nullopt;
+    return requiredAlignment && isKnownAddressAligned(base, offset, addressElementType, *requiredAlignment);
+}
 
 } // namespace pto
 } // namespace mlir

@@ -11,10 +11,110 @@
 #include "PTO/Transforms/VMIControlFlowSupport.h"
 
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "llvm/ADT/STLExtras.h"
 
 using namespace mlir;
 using namespace mlir::pto;
+
+namespace {
+
+using EquivalenceCallback = VMIControlFlowSupport::EquivalenceCallback;
+
+LogicalResult matchControlFlowValues(
+    ValueRange sources, ValueRange destinations, Operation* op, EquivalenceCallback addEquivalent)
+{
+    for (auto [index, source] : llvm::enumerate(sources)) {
+        bool hasDestination = index < destinations.size();
+        if (hasDestination && failed(addEquivalent(source, destinations[index], op))) {
+            return failure();
+        }
+    }
+    return success();
+}
+
+LogicalResult addBranchConstraints(BranchOpInterface branch, EquivalenceCallback addEquivalent)
+{
+    for (auto [index, destination] : llvm::enumerate(branch->getSuccessors())) {
+        SuccessorOperands operands = branch.getSuccessorOperands(index);
+        unsigned produced = operands.getProducedOperandCount();
+        if (produced > destination->getNumArguments()) {
+            return branch->emitError("branch produces too many destination arguments");
+        }
+        LogicalResult matched = matchControlFlowValues(
+            operands.getForwardedOperands(), destination->getArguments().drop_front(produced), branch, addEquivalent);
+        if (failed(matched)) {
+            return failure();
+        }
+    }
+    return success();
+}
+
+LogicalResult addRegionExitConstraints(
+    RegionBranchOpInterface branch, Region& region, EquivalenceCallback addEquivalent)
+{
+    SmallVector<RegionSuccessor, 4> successors;
+    branch.getSuccessorRegions(region, successors);
+    for (const RegionSuccessor& successor : successors) {
+        for (Block& block : region) {
+            auto terminator = dyn_cast<RegionBranchTerminatorOpInterface>(block.getTerminator());
+            if (!terminator) {
+                continue;
+            }
+            LogicalResult matched = matchControlFlowValues(
+                terminator.getSuccessorOperands(RegionBranchPoint(successor)), successor.getSuccessorInputs(), branch,
+                addEquivalent);
+            if (failed(matched)) {
+                return failure();
+            }
+        }
+    }
+    return success();
+}
+
+LogicalResult addRegionConstraints(RegionBranchOpInterface branch, EquivalenceCallback addEquivalent)
+{
+    SmallVector<RegionSuccessor, 4> successors;
+    branch.getSuccessorRegions(RegionBranchPoint::parent(), successors);
+    for (const RegionSuccessor& successor : successors) {
+        LogicalResult matched = matchControlFlowValues(
+            branch.getEntrySuccessorOperands(RegionBranchPoint(successor)), successor.getSuccessorInputs(), branch,
+            addEquivalent);
+        if (failed(matched)) {
+            return failure();
+        }
+    }
+    for (Region& region : branch->getRegions()) {
+        if (failed(addRegionExitConstraints(branch, region, addEquivalent))) {
+            return failure();
+        }
+    }
+    return success();
+}
+
+} // namespace
+
+LogicalResult VMIControlFlowSupport::addConstraints(Operation* op, EquivalenceCallback addEquivalent)
+{
+    if (!op) {
+        return success();
+    }
+    // Preserve the established loop-carried equivalence classes, including the
+    // zero-trip for result and the two distinct carry sequences of scf.while.
+    if (auto forOp = dyn_cast<scf::ForOp>(op)) {
+        return addForConstraints(forOp, addEquivalent);
+    }
+    if (auto whileOp = dyn_cast<scf::WhileOp>(op)) {
+        return addWhileConstraints(whileOp, addEquivalent);
+    }
+    if (auto branch = dyn_cast<BranchOpInterface>(op)) {
+        return addBranchConstraints(branch, addEquivalent);
+    }
+    if (auto branch = dyn_cast<RegionBranchOpInterface>(op)) {
+        return addRegionConstraints(branch, addEquivalent);
+    }
+    return success();
+}
 
 LogicalResult VMIControlFlowSupport::addForConstraints(
     scf::ForOp forOp, EquivalenceCallback addEquivalent) {

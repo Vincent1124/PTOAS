@@ -235,6 +235,7 @@ def jit(
     ast_rewrite: bool | None = None,
     frontend_options: Mapping | None = None,
     native_options: Mapping | None = None,
+    ptoas_flags: tuple[str, ...] = (),
     source: str | None = None,
 ):
     """
@@ -275,6 +276,11 @@ def jit(
                  provided, PTODSL keeps the Python signature as the host ABI
                  declaration but loads the kernel implementation from the
                  source file instead of tracing the Python body.
+    ptoas_flags:
+                 Additional PTOAS command-line options for this kernel's native
+                 build, for example layout search budgets. Pass a tuple of
+                 individual arguments. The options are part of the build cache
+                 identity and do not affect other kernels.
 
     The decorated function is replaced by a :class:`KernelHandle` that:
 
@@ -284,6 +290,12 @@ def jit(
       default specialization for convenience.
     - emits a backend-partitioned outer container by default.
     """
+    if not isinstance(ptoas_flags, (tuple, list)) or any(
+        not isinstance(flag, str) or not flag.startswith("--") or "\x00" in flag
+        for flag in ptoas_flags
+    ):
+        raise TypeError("ptoas_flags must be a tuple or list of --option or --option=value strings")
+    normalized_ptoas_flags = tuple(ptoas_flags)
     normalized_ast_rewrite = _normalize_frontend_options(
         ast_rewrite=ast_rewrite,
         frontend_options=frontend_options,
@@ -333,6 +345,7 @@ def jit(
                 source_line=getattr(fn.__code__, "co_firstlineno", None),
                 jit_source=source,
                 native_options=normalized_native_options,
+                ptoas_flags=normalized_ptoas_flags,
             ),
             kernel_signature,
             fn,
@@ -393,6 +406,7 @@ class KernelHandle(ModuleArtifact):
             module_spec.kernel_kind,
             module_spec.kernel_kind_explicit,
             module_spec.native_options,
+            module_spec.ptoas_flags,
         )
 
     def _build_default_module(self):

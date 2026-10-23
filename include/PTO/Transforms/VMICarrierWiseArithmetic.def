@@ -1,0 +1,48 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Shared by VMI-to-VPTO pattern registration and layout cost accounting.
+// Each mapping emits one data arithmetic instruction per result carrier.
+// Views, predicates and shared constants are outside this contract; BF16 abs
+// emits VAND in place of VABS. Compound and multi-result ops need separate rules.
+// Define both macros before including this file. Deliberately no include guard.
+
+VMI_MASKED_ARITHMETIC(VMIVaddOp, VaddOp)
+VMI_MASKED_ARITHMETIC(VMIVsubOp, VsubOp)
+VMI_MASKED_ARITHMETIC(VMIVmulOp, VmulOp)
+VMI_MASKED_ARITHMETIC(VMIVdivOp, VdivOp)
+VMI_MASKED_ARITHMETIC(VMIVminOp, VminOp)
+VMI_MASKED_ARITHMETIC(VMIVmaxOp, VmaxOp)
+// Dual-form bitwise ops occur in pipelines skipping unified-to-legacy.
+VMI_MASKED_ARITHMETIC(VMIVandOp, VandOp)
+VMI_MASKED_ARITHMETIC(VMIVorOp, VorOp)
+VMI_MASKED_ARITHMETIC(VMIVxorOp, VxorOp)
+// Vreg-interface forms retain the predicate after unified-to-legacy.
+VMI_MASKED_ARITHMETIC(VMIAndIOp, VandOp)
+VMI_MASKED_ARITHMETIC(VMIOrIOp, VorOp)
+VMI_MASKED_ARITHMETIC(VMIXOrIOp, VxorOp)
+VMI_MASKED_ARITHMETIC(VMINotOp, VnotOp)
+VMI_MASKED_ARITHMETIC(VMIVshlOp, VshlOp)
+VMI_MASKED_ARITHMETIC(VMIVshrOp, VshrOp)
+VMI_MASKED_ARITHMETIC(VMIVnegOp, VnegOp)
+VMI_MASKED_ARITHMETIC(VMIVsqrtOp, VsqrtOp)
+VMI_MASKED_ARITHMETIC(VMIVexpOp, VexpOp)
+VMI_MASKED_ARITHMETIC(VMIVlnOp, VlnOp)
+VMI_MASKED_ARITHMETIC(VMIVreluOp, VreluOp)
+VMI_MASKED_ARITHMETIC(VMIVnotOp, VnotOp)
+VMI_MASKED_ARITHMETIC(VMIVmulaOp, VmulaOp)
+VMI_MASKED_ARITHMETIC(VMIVaxpyOp, VaxpyOp)
+VMI_MASKED_ARITHMETIC(VMIVlreluOp, VlreluOp)
+VMI_MASKED_ARITHMETIC(VMIVpreluOp, VpreluOp)
+VMI_MASKED_ARITHMETIC(VMIVabsOp, VabsOp)
+VMI_SCALAR_ARITHMETIC(VMIAddSOp, VaddsOp)
+VMI_SCALAR_ARITHMETIC(VMIMulSOp, VmulsOp)
+VMI_SCALAR_ARITHMETIC(VMIMaxSOp, VmaxsOp)
+VMI_SCALAR_ARITHMETIC(VMIMinSOp, VminsOp)
+VMI_SCALAR_ARITHMETIC(VMIShlSOp, VshlsOp)
+VMI_SCALAR_ARITHMETIC(VMIShrSOp, VshrsOp)

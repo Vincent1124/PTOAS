@@ -49,6 +49,7 @@ std::unique_ptr<Pass> createPTOValidatePhysicalSectionBoundariesPass();
 std::unique_ptr<Pass> createPTOMaterializeTileOpSectionsPass();
 std::unique_ptr<Pass> createVPTOSplitCVModulePass();
 std::unique_ptr<Pass> createVPTONormalizeContainerPass();
+std::unique_ptr<Pass> createVPTOPack4StoreMaskNormalizePass();
 std::unique_ptr<Pass> createVPTOResolveBridgeInstancesPass();
 std::unique_ptr<Pass> createVPTOBridgeCallLoweringPass();
 std::unique_ptr<Pass> createPTOLowerBridgeOpsPass(llvm::StringRef policyPath = "");
@@ -152,6 +153,9 @@ std::unique_ptr<Pass> createVMIExpandImplicitEnsureLayoutsPass();
 std::unique_ptr<Pass> createVMIMaskGranularityAssignmentPass();
 std::unique_ptr<Pass> createVMILayoutRematerializeWeakProducersPass();
 std::unique_ptr<Pass> createVMILayoutAssignmentPass();
+struct VMILayoutPlannerOptions;
+std::unique_ptr<Pass>
+createVMILayoutAssignmentPass(const VMILayoutPlannerOptions &options);
 std::unique_ptr<Pass> createVMILayoutFoldPass();
 std::unique_ptr<Pass> createVMILayoutRematerializePass();
 std::unique_ptr<Pass> createVMILayoutSinkMaterializationPass();

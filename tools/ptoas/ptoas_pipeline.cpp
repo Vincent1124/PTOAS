@@ -13,6 +13,7 @@
 
 #include "ptoas_internal.h"
 #include "PTO/Transforms/VPTOBridgeTokens.h"
+#include "PTO/Transforms/VMILayoutPlanner.h"
 
 #include "mlir/Dialect/Arith/Transforms/BufferizableOpInterfaceImpl.h"
 #include "mlir/Dialect/Tensor/Transforms/BufferizableOpInterfaceImpl.h"
@@ -1056,30 +1057,37 @@ static void appendVMISemanticPipeline(OpPassManager &pm) {
   pm.addPass(pto::createVMILegalizeArithSelectPass());
   pm.addPass(pto::createVMIMaskGranularityAssignmentPass());
   pm.addPass(pto::createVMILayoutRematerializeWeakProducersPass());
-  pm.addPass(pto::createVMILayoutAssignmentPass());
+  pto::VMILayoutPlannerOptions layoutOptions;
+  layoutOptions.maxFrontierEntriesPerComponent = vmiLayoutMaxFrontierEntries;
+  layoutOptions.maxTransitionsPerComponent = vmiLayoutMaxTransitions;
+  pm.addPass(pto::createVMILayoutAssignmentPass(layoutOptions));
   pm.addPass(createCanonicalizerPass());
   pm.addPass(createCSEPass());
-  pm.addPass(pto::createVMILayoutRematerializePass());
-  pm.addPass(createCanonicalizerPass());
-  pm.addPass(createCSEPass());
+  // Post-assignment rematerialization is explicit opt-in. Pushing a result
+  // conversion through a producer can introduce multiple operand conversions
+  // and override the solver's costed layout choice.
   pm.addPass(pto::createVMILayoutFoldPass());
   pm.addPass(createCanonicalizerPass());
   pm.addPass(createCSEPass());
-  pm.addPass(pto::createVMILayoutSinkMaterializationPass());
+  // Layout conversion placement belongs to the assignment solver. The legacy
+  // sink pass remains available as an explicit opt-in, but must not rewrite
+  // the solver's selected execution/result layouts in the default pipeline.
   pm.addPass(createCanonicalizerPass());
   pm.addPass(createCSEPass());
   pm.addPass(pto::createVMILegalizeArithSelectPass());
   pm.addPass(pto::createPTOValidateVMILayoutIRPass());
-  // The layout solver selects E2B as a lowering preference, so a
-  // group_broadcast_load may still carry a contiguous result layout at this
-  // point. Make the preference explicit before vmi-to-vpto: retype the load
-  // result to the direct E2B d2/d4 layout and insert an ensure_layout
-  // d2/d4 -> contiguous right after it. Without this, vmi-to-vpto cannot
-  // lower the multi-part contiguous E2B form as a single packet per part.
-  pm.addPass(pto::createVMIExpandImplicitEnsureLayoutsPass());
+  // Keep the layout selected by the solver through VMI-to-VPTO.  In
+  // particular, do not force an E2B deinterleaved result after assignment:
+  // that choice would add a d2/d4 -> contiguous materialization outside the
+  // solver's cost graph and could turn a costed BRC decision into E2B plus
+  // VINTLV.  The explicit -vmi-expand-implicit-ensure-layouts test pass remains
+  // available for callers that intentionally request that compatibility
+  // rewrite.
   pto::VMIToVPTOOptions vmiToVPTOOptions;
   vmiToVPTOOptions.enableVmiFastmath = enableVmiFastmath;
   pm.addPass(pto::createVMIToVPTOPass(vmiToVPTOOptions));
+  pm.addPass(pto::createVPTOPack4StoreMaskNormalizePass());
+
   pm.addPass(pto::createVPTOStatefulStreamFusionPass());
 }
 

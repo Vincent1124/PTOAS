@@ -283,6 +283,7 @@ SCALAR_DTYPES = []
     backend="vpto",
     mode="explicit",
     source=KERNEL_SOURCE,
+    ptoas_flags=("--vmi-layout-max-frontier-entries=512",),
 )
 def kernel(
     src_gm: pto.ptr(pto.bf16, "gm"),

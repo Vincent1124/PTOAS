@@ -1,0 +1,60 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt %s -vmi-layout-assignment | FileCheck %s --check-prefix=ASSIGN --implicit-check-not=pto.vmi.ensure_layout
+
+// A carried layout is an equality across iterations, not an execution edge
+// from the second add to the first add in the same iteration.
+// This regression checks assignment; CFG carrier expansion belongs to the
+// separate VMI-to-VPTO control-flow conversion.
+// ASSIGN-LABEL: func.func @cfg_loop(
+// ASSIGN: ^[[LOOP:bb[0-9]+]](%[[X:.*]]: !pto.vmi.vreg<64xf32, #pto.vmi.layout<contiguous>>):
+// ASSIGN: %[[A:.*]] = pto.vmi.vadd %[[X]], %[[X]]
+// ASSIGN-NEXT: %[[B:.*]] = pto.vmi.vadd %[[A]], %[[A]]
+// ASSIGN-NEXT: pto.vmi.store %[[B]],
+// ASSIGN-NEXT: cf.cond_br %{{.*}}, ^[[LOOP]](%[[B]] : !pto.vmi.vreg<64xf32, #pto.vmi.layout<contiguous>>),
+module {
+  func.func @cfg_loop(%init: !pto.vmi.vreg<64xf32>, %cond: i1, %out: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    cf.br ^loop(%init : !pto.vmi.vreg<64xf32>)
+  ^loop(%x: !pto.vmi.vreg<64xf32>):
+    %a = pto.vmi.vadd %x, %x : !pto.vmi.vreg<64xf32>, !pto.vmi.vreg<64xf32> -> !pto.vmi.vreg<64xf32>
+    %b = pto.vmi.vadd %a, %a : !pto.vmi.vreg<64xf32>, !pto.vmi.vreg<64xf32> -> !pto.vmi.vreg<64xf32>
+    pto.vmi.store %b, %out[%c0] : !pto.vmi.vreg<64xf32>, !pto.ptr<f32, ub>
+    cf.cond_br %cond, ^loop(%b : !pto.vmi.vreg<64xf32>), ^exit
+  ^exit:
+    return
+  }
+}
+
+// The backedge also crosses blocks. Keep the forward transport dependency
+// and the layout equalities, so the entire loop can use D2 without repairs.
+// ASSIGN-LABEL: func.func @cfg_multiblock_loop(
+// ASSIGN: %[[INIT:.*]] = pto.vmi.broadcast{{.*}} -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+// ASSIGN: ^[[LOOP:bb[0-9]+]](%[[X:.*]]: !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>):
+// ASSIGN: %[[A:.*]] = pto.vmi.vadd %[[X]], %[[X]]
+// ASSIGN-NEXT: cf.br ^{{.*}}(%[[A]] : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>)
+// ASSIGN: %[[B:.*]] = pto.vmi.vadd
+// ASSIGN-NEXT: cf.cond_br %{{.*}}, ^[[LOOP]](%[[B]] : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>),
+// ASSIGN: pto.vmi.store{{.*}} : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+module {
+  func.func @cfg_multiblock_loop(%value: f32, %cond: i1, %out: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    %init = pto.vmi.broadcast %value : f32 -> !pto.vmi.vreg<128xf32>
+    cf.br ^loop(%init : !pto.vmi.vreg<128xf32>)
+  ^loop(%x: !pto.vmi.vreg<128xf32>):
+    %a = pto.vmi.vadd %x, %x : !pto.vmi.vreg<128xf32>, !pto.vmi.vreg<128xf32> -> !pto.vmi.vreg<128xf32>
+    cf.br ^body(%a : !pto.vmi.vreg<128xf32>)
+  ^body(%y: !pto.vmi.vreg<128xf32>):
+    %b = pto.vmi.vadd %y, %y : !pto.vmi.vreg<128xf32>, !pto.vmi.vreg<128xf32> -> !pto.vmi.vreg<128xf32>
+    cf.cond_br %cond, ^loop(%b : !pto.vmi.vreg<128xf32>), ^exit(%b : !pto.vmi.vreg<128xf32>)
+  ^exit(%result: !pto.vmi.vreg<128xf32>):
+    pto.vmi.store %result, %out[%c0] : !pto.vmi.vreg<128xf32>, !pto.ptr<f32, ub>
+    return
+  }
+}

@@ -1574,39 +1574,6 @@ struct VMIMemoryAccessPlan {
   const VMIPhysicalMemorySegment &front() const { return segments.front(); }
 };
 
-static std::optional<int64_t> getPhysicalVectorBytes(VRegType type) {
-  unsigned elementBits = pto::getPTOStorageElemBitWidth(type.getElementType());
-  int64_t totalBits;
-  if (elementBits == 0 ||
-      llvm::MulOverflow(type.getElementCount(),
-                        static_cast<int64_t>(elementBits), totalBits) ||
-      totalBits <= 0 || totalBits % kBitsPerByte != 0) {
-    return std::nullopt;
-  }
-  return totalBits / kBitsPerByte;
-}
-
-static bool isDirectMemoryDistAddressLegal(Value base, Value offset,
-                                           Type addressElementType,
-                                           VRegType registerType,
-                                           VPTOMemoryOpFamily family,
-                                           StringRef dist) {
-  unsigned registerElementBits =
-      pto::getPTOStorageElemBitWidth(registerType.getElementType());
-  const VPTOMemoryDistContract *contract = lookupVPTOMemoryDist(
-      family, dist,
-      registerElementBits == 0 ? std::nullopt
-                               : std::optional<unsigned>(registerElementBits));
-  std::optional<int64_t> vectorBytes = getPhysicalVectorBytes(registerType);
-  std::optional<int64_t> requiredAlignment =
-      contract && vectorBytes
-          ? contract->getRequiredAlignmentBytes(*vectorBytes)
-          : std::nullopt;
-  return requiredAlignment &&
-         isKnownAddressAligned(base, offset, addressElementType,
-                               *requiredAlignment);
-}
-
 FailureOr<VMIMemoryLaneAddressMap>
 buildContiguousIdentityLaneAddressMap(int64_t constantOffset,
                                       VMIVRegType resultType,

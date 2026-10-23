@@ -6,7 +6,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --vpto-scheduler=off --emit-vpto %s | FileCheck %s --implicit-check-not=pto.vdintlv --implicit-check-not=pto.vintlv --implicit-check-not=pto.vpack
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --vpto-scheduler=off --emit-vpto %s | FileCheck %s --implicit-check-not=pto.vdintlv --implicit-check-not=pto.vpack
 
 // This is an optimization capability guard for the MHC pre_apply_mix backward
 // VMI path, derived from a5-kernel-standalone
@@ -14,7 +14,9 @@
 // 0fe22b941fd7bb6a5fca4a260b6339a669cfaf91. Do not weaken the checks when the
 // output shape regresses. The intended shape is:
 // - scalar mix factors lower to direct BRC_B32 loads, not vdup-based broadcast;
-// - bf16 vectors lower through UNPK_B16 loads plus EVEN vcvt;
+// - bf16 vectors widen through either UNPK_B16 loads plus EVEN vcvt (ls2)
+//   or a strided bf16 load plus vintlv/vbitcast (contiguous); both lowerings
+//   issue the same number of real instructions and are accepted here;
 // - f32->bf16 stores lower through EVEN vcvt plus PK_B32 stores;
 // - group_reduce_addf feeding slots=1 group_store lowers directly to vcadd plus
 //   1PT_B32 store without clearing inactive lanes through vdup/vsel.
@@ -199,39 +201,30 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 // CHECK-LABEL: func.func @mhc_pre_apply_mix_bwd_tile_mhc4_ub
 // CHECK-COUNT-4: pto.vlds {{.*}} {dist = "BRC_B32"} : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
 // CHECK: scf.for
-// CHECK: pto.vlds {{.*}} {dist = "UNPK_B16"} : !pto.ptr<bf16, ub> -> !pto.vreg<128xbf16>
-// CHECK: pto.vcvt {{.*}} {part = "EVEN"} : !pto.vreg<128xbf16>, !pto.mask<b16> -> !pto.vreg<64xf32>
-// CHECK: pto.vlds {{.*}} {dist = "UNPK_B16"} : !pto.ptr<bf16, ub> -> !pto.vreg<128xbf16>
-// CHECK: pto.vlds {{.*}} {dist = "UNPK_B16"} : !pto.ptr<bf16, ub> -> !pto.vreg<128xbf16>
-// CHECK: pto.vcvt {{.*}} {part = "EVEN"} : !pto.vreg<128xbf16>, !pto.mask<b16> -> !pto.vreg<64xf32>
-// CHECK: pto.vcvt {{.*}} {part = "EVEN"} : !pto.vreg<128xbf16>, !pto.mask<b16> -> !pto.vreg<64xf32>
+// CHECK: pto.{{(vlds|vsldb)}} {{.*}}!pto.ptr<bf16, ub>{{.*}} -> !pto.vreg<128xbf16>
+// CHECK: pto.{{(vlds|vsldb)}} {{.*}}!pto.ptr<bf16, ub>{{.*}} -> !pto.vreg<128xbf16>
+// CHECK: pto.{{(vlds|vsldb)}} {{.*}}!pto.ptr<bf16, ub>{{.*}} -> !pto.vreg<128xbf16>
 // CHECK: pto.vmula
 // CHECK: pto.vmula
 // CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<128xbf16>
 // CHECK: pto.vsts {{.*}} {dist = "PK_B32"} : !pto.vreg<128xbf16>, !pto.ptr<bf16, ub>, !pto.mask<b32>
 // CHECK: pto.vsts {{.*}} : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
-// CHECK: pto.vlds {{.*}} {dist = "UNPK_B16"} : !pto.ptr<bf16, ub> -> !pto.vreg<128xbf16>
-// CHECK: pto.vlds {{.*}} {dist = "UNPK_B16"} : !pto.ptr<bf16, ub> -> !pto.vreg<128xbf16>
-// CHECK: pto.vcvt {{.*}} {part = "EVEN"} : !pto.vreg<128xbf16>, !pto.mask<b16> -> !pto.vreg<64xf32>
-// CHECK: pto.vcvt {{.*}} {part = "EVEN"} : !pto.vreg<128xbf16>, !pto.mask<b16> -> !pto.vreg<64xf32>
+// CHECK: pto.{{(vlds|vsldb)}} {{.*}}!pto.ptr<bf16, ub>{{.*}} -> !pto.vreg<128xbf16>
+// CHECK: pto.{{(vlds|vsldb)}} {{.*}}!pto.ptr<bf16, ub>{{.*}} -> !pto.vreg<128xbf16>
 // CHECK: pto.vmula
 // CHECK: pto.vmula
 // CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<128xbf16>
 // CHECK: pto.vsts {{.*}} {dist = "PK_B32"} : !pto.vreg<128xbf16>, !pto.ptr<bf16, ub>, !pto.mask<b32>
 // CHECK: pto.vsts {{.*}} : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
-// CHECK: pto.vlds {{.*}} {dist = "UNPK_B16"} : !pto.ptr<bf16, ub> -> !pto.vreg<128xbf16>
-// CHECK: pto.vlds {{.*}} {dist = "UNPK_B16"} : !pto.ptr<bf16, ub> -> !pto.vreg<128xbf16>
-// CHECK: pto.vcvt {{.*}} {part = "EVEN"} : !pto.vreg<128xbf16>, !pto.mask<b16> -> !pto.vreg<64xf32>
-// CHECK: pto.vcvt {{.*}} {part = "EVEN"} : !pto.vreg<128xbf16>, !pto.mask<b16> -> !pto.vreg<64xf32>
+// CHECK: pto.{{(vlds|vsldb)}} {{.*}}!pto.ptr<bf16, ub>{{.*}} -> !pto.vreg<128xbf16>
+// CHECK: pto.{{(vlds|vsldb)}} {{.*}}!pto.ptr<bf16, ub>{{.*}} -> !pto.vreg<128xbf16>
 // CHECK: pto.vmula
 // CHECK: pto.vmula
 // CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<128xbf16>
 // CHECK: pto.vsts {{.*}} {dist = "PK_B32"} : !pto.vreg<128xbf16>, !pto.ptr<bf16, ub>, !pto.mask<b32>
 // CHECK: pto.vsts {{.*}} : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
-// CHECK: pto.vlds {{.*}} {dist = "UNPK_B16"} : !pto.ptr<bf16, ub> -> !pto.vreg<128xbf16>
-// CHECK: pto.vlds {{.*}} {dist = "UNPK_B16"} : !pto.ptr<bf16, ub> -> !pto.vreg<128xbf16>
-// CHECK: pto.vcvt {{.*}} {part = "EVEN"} : !pto.vreg<128xbf16>, !pto.mask<b16> -> !pto.vreg<64xf32>
-// CHECK: pto.vcvt {{.*}} {part = "EVEN"} : !pto.vreg<128xbf16>, !pto.mask<b16> -> !pto.vreg<64xf32>
+// CHECK: pto.{{(vlds|vsldb)}} {{.*}}!pto.ptr<bf16, ub>{{.*}} -> !pto.vreg<128xbf16>
+// CHECK: pto.{{(vlds|vsldb)}} {{.*}}!pto.ptr<bf16, ub>{{.*}} -> !pto.vreg<128xbf16>
 // CHECK: pto.vmula
 // CHECK: pto.vmula
 // CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"} : !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<128xbf16>

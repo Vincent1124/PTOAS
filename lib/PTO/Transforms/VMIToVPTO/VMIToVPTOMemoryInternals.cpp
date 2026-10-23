@@ -439,43 +439,34 @@ LogicalResult checkSupportedStoreShape(VMIVRegType type, Value destination,
   return checkStorePhysicalCoverage(type, reason);
 }
 
-LogicalResult checkSupportedInterleaveStoreShape(
-    VMIInterleaveStoreOp op,
-    std::string *reason) {
-  auto lowType = cast<VMIVRegType>(op.getLow().getType());
-  auto highType = cast<VMIVRegType>(op.getHigh().getType());
-  VMILayoutAttr lowLayout = lowType.getLayoutAttr();
-  VMILayoutAttr highLayout = highType.getLayoutAttr();
-  bool nonContiguousInputs =
-      !lowLayout || !highLayout || !lowLayout.isContiguous() ||
-      !highLayout.isContiguous();
-  if (nonContiguousInputs) {
-    return emitLogicalFailure(reason, "requires assigned contiguous low/high input layouts");
-  }
-  bool mismatchedInputs = lowType.getElementCount() != highType.getElementCount() ||
-                        lowType.getElementType() != highType.getElementType();
-  if (mismatchedInputs) {
-    return emitLogicalFailure(reason, "requires matching low/high input shape and element type");
-  }
-  if (!getX2MemoryDistToken(lowType.getElementType(), "INTLV")) {
-    return emitLogicalFailure(reason, "requires 8/16/32-bit element type for vstsx2 INTLV");
-  }
+LogicalResult checkSupportedInterleaveStoreShape(VMIInterleaveStoreOp op, std::string* reason)
+{
+    auto lowType = cast<VMIVRegType>(op.getLow().getType());
+    auto highType = cast<VMIVRegType>(op.getHigh().getType());
+    bool mismatchedInputs = lowType.getElementCount() != highType.getElementCount() ||
+                            lowType.getElementType() != highType.getElementType();
+    if (mismatchedInputs) {
+        return emitLogicalFailure(reason, "requires matching low/high input shape and element type");
+    }
+    VMILayoutSupport layoutSupport;
+    if (failed(layoutSupport.getInterleaveStoreSupport(lowType, highType, reason))) {
+        return failure();
+    }
 
-  VMIMemoryAccessPlan accessPlan =
-      buildWriteAccessPlan(op.getDestination(), op.getOffset(), lowType,
-                           VMIMemoryCoverageKind::Dense);
-  if (!accessPlan.layoutSupport.isSupported()) {
-    return emitLogicalFailure(reason, accessPlan.layoutSupport.reason);
-  }
-  if (failed(checkSupportedMaskableVReg(lowType, reason))) {
-    return failure();
-  }
+    VMIMemoryAccessPlan accessPlan =
+        buildWriteAccessPlan(op.getDestination(), op.getOffset(), lowType, VMIMemoryCoverageKind::Dense);
+    if (!accessPlan.layoutSupport.isSupported()) {
+        return emitLogicalFailure(reason, accessPlan.layoutSupport.reason);
+    }
+    if (failed(checkSupportedMaskableVReg(lowType, reason))) {
+        return failure();
+    }
 
-  std::string fullChunkReason;
-  if (failed(checkFullDataPhysicalChunks(lowType, &fullChunkReason))) {
-    return emitLogicalFailure(reason, Twine("requires full physical chunks; ") + fullChunkReason);
-  }
-  return success();
+    std::string fullChunkReason;
+    if (failed(checkFullDataPhysicalChunks(lowType, &fullChunkReason))) {
+        return emitLogicalFailure(reason, Twine("requires full physical chunks; ") + fullChunkReason);
+    }
+    return success();
 }
 
 FailureOr<int64_t> getGroupSizeFromNumGroups(VMIVRegType type,
@@ -888,8 +879,12 @@ LogicalResult checkSupportedGroupSlotLoadShape(
     std::string *reason) {
   auto resultType = cast<VMIVRegType>(op.getResult().getType());
   VMILayoutSupport supports;
+  // The stride-aware overload is the fork's signature; it asks the shared
+  // support model about the source group stride as well.  Its extra checks are
+  // guarded by "the stride operand is present", and pto.vmi.group_slot_load
+  // always carries that operand, so this call site sees them.
   FailureOr<VMIGroupSlotLayoutFact> fact = supports.getGroupSlotLoadLayoutFact(
-      resultType, op.getNumGroupsAttr().getInt(), reason);
+      resultType, op.getSourceGroupStride(), op.getNumGroupsAttr().getInt(), reason);
   if (failed(fact)) {
     return failure();
   }
@@ -1139,11 +1134,17 @@ checkSupportedGroupStoreByLayout(VMIGroupStoreOp op, VMIVRegType valueType,
                                  VMILayoutAttr layout,
                                  std::optional<int64_t> rowStride,
                                  std::string *reason) {
-  bool compactSmallGroup = isCompactSmallGroupStore(
-      layout, valueType, op.getNumGroupsAttr().getInt(), rowStride);
-  if (compactSmallGroup) {
-    return checkSupportedCompactSmallGroupStoreShape(op, valueType, reason);
-  }
+    // The literal predicate stays first, so every shape it classified compact
+    // keeps that classification by construction; the layout fact is an extra
+    // route, not a replacement (measured: replacing it outright broke
+    // vmi_to_vpto_group_store_compact_small, so the staging path is load-bearing
+    // in this base).
+    auto layoutFact = VMILayoutSupport().getGroupStoreLayoutFact(op, valueType);
+    bool compactSmallGroup = isCompactSmallGroupStore(layout, valueType, op.getNumGroupsAttr().getInt(), rowStride) ||
+                             (succeeded(layoutFact) && layoutFact->stagingLayout);
+    if (compactSmallGroup) {
+        return checkSupportedCompactSmallGroupStoreShape(op, valueType, reason);
+    }
   if (layout && layout.isGroupSlots()) {
     return checkSupportedGroupSlotsStoreShape(op, valueType, rowStride, reason);
   }

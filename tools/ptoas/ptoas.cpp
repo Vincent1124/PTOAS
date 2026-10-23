@@ -7,6 +7,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 #include "ptoas_internal.h"
+#include "PTO/Transforms/VMILayoutPlanner.h"
 
 #include "mlir/Dialect/Arith/Transforms/BufferizableOpInterfaceImpl.h"
 #include "mlir/Dialect/Tensor/Transforms/BufferizableOpInterfaceImpl.h"
@@ -262,6 +263,18 @@ llvm::cl::opt<bool> enableVmiFastmath(
                    "results, including f32-to-bf16 narrowing. Enabled by "
                    "default; pass --vmi-fastmath=false to disable"),
     llvm::cl::init(true));
+
+llvm::cl::opt<unsigned> vmiLayoutMaxFrontierEntries(
+    "vmi-layout-max-frontier-entries",
+    llvm::cl::desc("Maximum VMI layout search frontier entries per component "
+                   "(must be positive)"),
+    llvm::cl::init(VMILayoutPlannerOptions{}.maxFrontierEntriesPerComponent));
+
+llvm::cl::opt<unsigned> vmiLayoutMaxTransitions(
+    "vmi-layout-max-transitions",
+    llvm::cl::desc("Maximum VMI layout search transitions per component "
+                   "(must be positive)"),
+    llvm::cl::init(VMILayoutPlannerOptions{}.maxTransitionsPerComponent));
 
 llvm::cl::opt<bool> planMemoryOrderBySize(
     "plan-memory-order-by-size",

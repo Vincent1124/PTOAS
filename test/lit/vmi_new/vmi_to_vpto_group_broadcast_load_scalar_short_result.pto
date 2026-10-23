@@ -12,7 +12,7 @@
 // A one-lane load followed by an ungrouped broadcast fuses into a scalar
 // group_broadcast_load (num_groups = 1).  Its equal-valued result fills whole
 // physical chunks with one BRC load, so even a result shorter than a physical
-// part -- or a half-part 128-lane 8-bit result carried at lane_stride = 2 --
+// part -- including a half-part 128-lane 8-bit result --
 // lowers as one broadcast load per chunk.  The compact eight-lane stores keep
 // their packed group_slots carrier, reached through the contiguous carrier
 // bridge.
@@ -56,8 +56,8 @@ module {
   }
 
   // i8, VL 128: a 128-lane 8-bit single-group broadcast is a gb(4) group (half
-  // a 256-lane part); the dense 128-element store prefers the lane_stride = 2
-  // carrier.
+  // a 256-lane part). The solver keeps its contiguous carrier for a direct
+  // dense store without an unpack/pack pair.
   func.func @gbl_scalar_i8_half_part(%src: !pto.ptr<i8, ub>, %dst: !pto.ptr<i8, ub>) {
     %c0 = arith.constant 0 : index
     %lane = pto.vmi.vload %src[%c0]
@@ -107,7 +107,7 @@ module {
 
 // ASSIGN-LABEL: func.func @gbl_scalar_i8_half_part(
 // ASSIGN: %[[R:.*]] = pto.vmi.group_broadcast_load {{.*}} {num_groups = 1 : i64}
-// ASSIGN-SAME: -> !pto.vmi.vreg<128xi8, #pto.vmi.layout<contiguous, lane_stride = 2>>
+// ASSIGN-SAME: -> !pto.vmi.vreg<128xi8, #pto.vmi.layout<contiguous>>
 // ASSIGN: pto.vmi.store %[[R]]
 
 // ASSIGN-LABEL: func.func @gbl_scalar_dynamic_stride(
@@ -142,11 +142,14 @@ module {
 // LOWER-NOT: pto.vlds
 
 // LOWER-LABEL: func.func @gbl_scalar_i8_half_part(
+// LOWER-SAME: %[[SRC:.*]]: !pto.ptr<i8, ub>, %[[DST:.*]]: !pto.ptr<i8, ub>
+// LOWER: %[[COUNT:.*]] = arith.constant 128 : i32
+// LOWER: %[[ZERO:.*]] = arith.constant 0 : index
 // LOWER-NOT: pto.vlds
-// LOWER: %[[R:.*]] = pto.vlds {{.*}} {dist = "BRC_B8"}
-// LOWER-SAME: -> !pto.vreg<256xi8>
-// LOWER-NOT: pto.vlds
-// LOWER: pto.vst
+// LOWER: %[[R:.*]] = pto.vlds %[[SRC]][%[[ZERO]]] {dist = "BRC_B8"} : !pto.ptr<i8, ub> -> !pto.vreg<256xi8>
+// LOWER-NEXT: %[[MASK:.*]], %{{.*}} = pto.plt_b8 %[[COUNT]] : i32 -> !pto.mask<b8>, i32
+// LOWER-NEXT: pto.vsts %[[R]], %[[DST]][%[[ZERO]]], %[[MASK]] : !pto.vreg<256xi8>, !pto.ptr<i8, ub>, !pto.mask<b8>
+// LOWER-NEXT: return
 // LOWER-NOT: pto.vlds
 
 // LOWER-LABEL: func.func @gbl_scalar_dynamic_stride(
