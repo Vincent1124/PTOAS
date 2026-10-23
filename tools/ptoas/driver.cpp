@@ -1467,6 +1467,10 @@ loadDriverModule(PTOASContext &context, bool cliArchSpecified) {
   if (!module) {
     return {};
   }
+  // Validate the complete peer container before backend option diagnostics
+  // or child-job extraction, while all peer function bodies are stable.
+  if (failed(mlir::pto::verifyFrontendPeerContracts(*module)))
+    return {};
   context.setArch(std::move(arch));
   return module;
 }

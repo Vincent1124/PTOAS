@@ -139,14 +139,18 @@ LogicalResult AicInitializePipeOp::verify() {
     return failure();
   }
 
-  auto accPushEpilogue = getAccPushEpilogueAttr();
+  return success();
+}
+
+static LogicalResult verifyAicPeerContract(AicInitializePipeOp op) {
+  auto accPushEpilogue = op.getAccPushEpilogueAttr();
   if (!accPushEpilogue) {
     return success();
   }
 
-  auto peerConsumerInitOr = lookupFixpipePeerConsumerInit(*this);
+  auto peerConsumerInitOr = lookupFixpipePeerConsumerInit(op);
   if (failed(peerConsumerInitOr)) {
-    return emitOpError()
+    return op.emitOpError()
            << "expects peer consumer function to contain a matching "
               "aiv_initialize_pipe with the same consumer buffer contract";
   }
@@ -154,27 +158,27 @@ LogicalResult AicInitializePipeOp::verify() {
   Operation *peerConsumerInit = *peerConsumerInitOr;
   auto peerAccPushEpilogue = getAccPushEpilogueFromInitOp(peerConsumerInit);
   if (!peerAccPushEpilogue) {
-    return emitOpError()
+    return op.emitOpError()
            << "expects peer consumer pipe init to also have "
               "'acc_push_epilogue' for fixpipe contract consistency";
   }
 
   if (peerAccPushEpilogue.getLayout() != accPushEpilogue.getLayout()) {
-    return emitOpError()
+    return op.emitOpError()
            << "expects acc_push_epilogue.layout to match peer consumer "
            << "(producer has " << stringifyFixpipeLayout(accPushEpilogue.getLayout())
            << ", consumer has " << stringifyFixpipeLayout(peerAccPushEpilogue.getLayout())
            << ")";
   }
   if (peerAccPushEpilogue.getQuant() != accPushEpilogue.getQuant()) {
-    return emitOpError()
+    return op.emitOpError()
            << "expects acc_push_epilogue.quant to match peer consumer "
            << "(producer has " << stringifyFixpipeQuant(accPushEpilogue.getQuant())
            << ", consumer has " << stringifyFixpipeQuant(peerAccPushEpilogue.getQuant())
            << ")";
   }
   if (peerAccPushEpilogue.getRelu() != accPushEpilogue.getRelu()) {
-    return emitOpError()
+    return op.emitOpError()
            << "expects acc_push_epilogue.relu to match peer consumer "
            << "(producer has " << stringifyFixpipeRelu(accPushEpilogue.getRelu())
            << ", consumer has " << stringifyFixpipeRelu(peerAccPushEpilogue.getRelu())

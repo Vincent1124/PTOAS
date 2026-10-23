@@ -341,6 +341,10 @@ func::FuncOp lookupPeerFuncAcrossContainer(Operation *op,
 /// Find one reserve_buffer by logical name inside a function.
 ReserveBufferOp findReserveBufferByName(func::FuncOp funcOp, StringRef name);
 
+/// Verify cross-function frontend contracts while the owning module is stable.
+/// Ordinary operation verifiers must not traverse peer function bodies.
+LogicalResult verifyFrontendPeerContracts(ModuleOp module);
+
 } // namespace pto
 } // namespace mlir
 

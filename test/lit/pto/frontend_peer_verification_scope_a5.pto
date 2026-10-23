@@ -1,0 +1,65 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: split-file %s %t
+// RUN: pto-test-opt %t/missing_peer.pto --pass-pipeline='builtin.module(func.func(canonicalize))' -o %t/missing_peer.mlir
+// RUN: not ptoas --pto-arch=a5 %t/missing_peer.mlir 2>&1 | FileCheck %s --check-prefix=MISSING-PEER
+// RUN: pto-test-opt %t/dead_reserve.pto --pass-pipeline='builtin.module(func.func(canonicalize))' -o %t/dead_reserve.mlir
+// RUN: FileCheck %s --check-prefix=LOCAL < %t/dead_reserve.mlir
+// RUN: not ptoas --pto-arch=a5 %t/dead_reserve.mlir 2>&1 | FileCheck %s --check-prefix=MISSING-RESERVE
+// RUN: not pto-test-opt %t/duplicate_import.pto -o /dev/null 2>&1 | FileCheck %s --check-prefix=DUPLICATE
+//
+// Function pass verification must not inspect peer bodies: canonicalization
+// can erase a reserve in a different function. Validate peer contracts only
+// at a stable module boundary. Keep local uniqueness checks in op verification.
+
+//--- missing_peer.pto
+module {
+  func.func @consumer() -> i32 {
+    %import = pto.import_reserved_buffer {name = "fifo", peer_func = @absent} -> i32
+    return %import : i32
+  }
+}
+// MISSING-PEER: error: 'pto.import_reserved_buffer' op expects 'peer_func' to reference an existing func.func
+
+//--- dead_reserve.pto
+module {
+  func.func @consumer() -> i32 {
+    %import = pto.import_reserved_buffer {name = "fifo", peer_func = @producer} -> i32
+    return %import : i32
+  }
+  func.func @producer() {
+    %false = arith.constant false
+    scf.if %false {
+      %buffer = pto.reserve_buffer {name = "fifo", size = 4096,
+        location = #pto.address_space<vec>, auto = true} -> i32
+    }
+    return
+  }
+}
+// LOCAL: func.func @consumer
+// LOCAL: pto.import_reserved_buffer
+// LOCAL: func.func @producer
+// LOCAL-NOT: pto.reserve_buffer
+// LOCAL: return
+// MISSING-RESERVE: error: 'pto.import_reserved_buffer' op expects matching peer reserve_buffer to exist
+
+//--- duplicate_import.pto
+module {
+  func.func @consumer() -> (i32, i32) {
+    %first = pto.import_reserved_buffer {name = "fifo", peer_func = @producer} -> i32
+    %second = pto.import_reserved_buffer {name = "fifo", peer_func = @producer} -> i32
+    return %first, %second : i32, i32
+  }
+  func.func @producer() {
+    %buffer = pto.reserve_buffer {name = "fifo", size = 4096,
+      location = #pto.address_space<vec>, auto = true} -> i32
+    return
+  }
+}
+// DUPLICATE: error: 'pto.import_reserved_buffer' op requires (name, peer_func) to be unique within the function

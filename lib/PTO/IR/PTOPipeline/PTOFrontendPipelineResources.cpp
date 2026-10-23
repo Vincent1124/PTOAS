@@ -146,11 +146,6 @@ LogicalResult ImportReservedBufferOp::verify() {
     return emitOpError("must be nested under a func.func");
   }
 
-  auto peerFunc = lookupPeerFuncAcrossContainer(getOperation(), getPeerFuncAttr());
-  if (!peerFunc) {
-    return emitOpError("expects 'peer_func' to reference an existing func.func");
-  }
-
   unsigned sameImportCount = 0;
   funcOp.walk([&](ImportReservedBufferOp importOp) {
     if (importOp.getName() == getName() &&
@@ -163,10 +158,17 @@ LogicalResult ImportReservedBufferOp::verify() {
         "requires (name, peer_func) to be unique within the function");
   }
 
-  if (!findReserveBufferByName(peerFunc, getName())) {
-    return emitOpError("expects matching peer reserve_buffer to exist");
-  }
+  return success();
+}
 
+static LogicalResult verifyImportedPeerBuffer(ImportReservedBufferOp op) {
+  auto peerFunc =
+      lookupPeerFuncAcrossContainer(op.getOperation(), op.getPeerFuncAttr());
+  if (!peerFunc)
+    return op.emitOpError(
+        "expects 'peer_func' to reference an existing func.func");
+  if (!mlir::pto::findReserveBufferByName(peerFunc, op.getName()))
+    return op.emitOpError("expects matching peer reserve_buffer to exist");
   return success();
 }
 

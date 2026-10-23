@@ -650,11 +650,9 @@ struct SerialFrontendPipeLoweringPass
     functionPM.addPass(pto::createPTOAssignDefaultFrontendPipeIdPass());
     functionPM.addPass(pto::createPTOLowerFrontendPipeOpsPass());
 
-    // Fixpipe frontend verifiers resolve peer contracts by inspecting sibling
-    // functions. Running this function pipeline through a regular nested pass
-    // adaptor allows one function to be verified while another function is
-    // still mutating its pipe ops. Keep these two small passes serial so every
-    // verifier observes either the complete frontend or complete lowered form.
+    // Lower peer-connected frontend pipe operations in a stable order. Cross-
+    // function contracts were checked at module scope before normalization;
+    // function-local verification must not traverse sibling function bodies.
     for (func::FuncOp funcOp :
          collectSharedPipelineFunctions(getOperation())) {
       if (failed(runPipeline(functionPM, funcOp))) {
@@ -1360,6 +1358,9 @@ static LogicalResult validateCompileOptions(ModuleOp module,
 }
 
 static LogicalResult runPreBackendNormalization(ModuleOp module) {
+  // This entry also serves embedded compilation, outside the CLI job driver.
+  if (failed(pto::verifyFrontendPeerContracts(module)))
+    return failure();
   PassManager preBackendPM(module.getContext());
   preBackendPM.enableVerifier();
   preBackendPM.addPass(pto::createPTOMaterializeTileOpSectionsPass());

@@ -112,6 +112,23 @@
 #include "PTOPipeline/PTOAsyncCommunicationVerification.cpp"
 #include "PTOPipeline/PTOCollectiveAndPipelineVerification.cpp"
 #include "PTOPipeline/PTOAivPipelineVerification.cpp"
+
+LogicalResult mlir::pto::verifyFrontendPeerContracts(ModuleOp module) {
+  WalkResult result = module.walk([](Operation *op) {
+    LogicalResult status = success();
+    if (auto imported = dyn_cast<ImportReservedBufferOp>(op))
+      status = verifyImportedPeerBuffer(imported);
+    else if (auto producer = dyn_cast<AicInitializePipeOp>(op))
+      status = verifyAicPeerContract(producer);
+    else if (auto consumer = dyn_cast<AivInitializePipeOp>(op)) {
+      if (auto epilogue = consumer.getAccPushEpilogueAttr())
+        status = verifyAivFixpipe(consumer, epilogue);
+    }
+    return failed(status) ? WalkResult::interrupt() : WalkResult::advance();
+  });
+  return failure(result.wasInterrupted());
+}
+
 #include "PTOPipeline/PTOFrontendPipelineTransferOps.cpp"
 #include "PTOPipeline/PTOInternalPipelineOps.cpp"
 #include "PTOPipeline/PTOSimtVerificationAndAsyncEffects.cpp"

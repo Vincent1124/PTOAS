@@ -160,7 +160,15 @@ LogicalResult AivInitializePipeOp::verify() {
           verifyFrontendInitCommon(*this, FunctionKernelKind::Vector, "vector")))
     return failure();
   auto epilogue = getAccPushEpilogueAttr();
-  return epilogue ? verifyAivFixpipe(*this, epilogue) : success();
+  if (!epilogue)
+    return success();
+  auto consumer = getOperation()->getParentOfType<func::FuncOp>();
+  auto tile = getAivFixpipeConsumerTile(*this, consumer, epilogue);
+  if (failed(tile))
+    return failure();
+  // Check only the local capacity here; the producer belongs to another
+  // function and is checked by verifyFrontendPeerContracts at module scope.
+  return verifyAivFixpipeCapacity(*this, nullptr, *tile);
 }
 
 static LogicalResult verifyFrontendDataCommon(
