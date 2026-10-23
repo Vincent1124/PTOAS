@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto \
+// RUN:   --mlir-print-ir-after=vpto-expand-wrapper-ops %s -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @mte_l1_l0a_3d_expand(
+      %src: !pto.ptr<f16, l1>, %dst: !pto.ptr<f16, l0a>) attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c3 = arith.constant 3 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c8, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+      : !pto.ptr<f16, l1>, !pto.ptr<f16, l0a>
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @mte_l1_l0a_3d_expand(
+// CHECK: arith.constant 524296 : i64
+// CHECK-NEXT: arith.constant 12884967427 : i64
+// CHECK: pto.set_l3d_fmatrix %{{.*}}
+// CHECK-NEXT: pto.set_padding %{{.*}}
+// CHECK-NEXT: pto.set_l3d_rpt %{{.*}}
+// CHECK-NEXT: pto.load_l1_to_l0a_3d %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : !pto.ptr<f16, l1>, !pto.ptr<f16, l0a>

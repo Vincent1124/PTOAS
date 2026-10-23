@@ -100,6 +100,7 @@ from ._ops_common import (
     _normalize_mte_store_l2_cache,
     _normalize_sat_mode,
     _normalize_token,
+    _pointer_element_type,
     _validate_raw_fill_l1_fill_word_bits,
     _validate_raw_fill_l1_static_scalar,
 )
@@ -1525,6 +1526,181 @@ def mte_l1_l0b_mx(
         start_row=_coerce_i64(start_row, context="mte_l1_l0b_mx start_row"),
         start_col=_coerce_i64(start_col, context="mte_l1_l0b_mx start_col"),
     )
+
+
+def _derive_l3d_stride_defaults(
+    *,
+    source,
+    fmap_h,
+    fmap_w,
+    filter_h,
+    filter_w,
+    channel_size,
+    stride_h,
+    stride_w,
+    dilation_h,
+    dilation_w,
+    pad_top,
+    pad_bottom,
+    pad_left,
+    pad_right,
+    repeat_time,
+    repeat_mode,
+    repeat_source_stride,
+    dst_stride,
+):
+    """Complete the ``(repeat_source_stride, dst_stride)`` pair.
+
+    The two strides travel together at IR level (their hardware defaults are
+    derived from the load geometry during expansion), so when the caller
+    supplies only one of them this helper derives the other from the
+    compile-time-constant geometry.  Dynamic (non-constant) inputs require
+    both to be passed explicitly.
+    """
+    for name, value in (
+        ("fmap_h", fmap_h),
+        ("fmap_w", fmap_w),
+        ("filter_h", filter_h),
+        ("filter_w", filter_w),
+        ("channel_size", channel_size),
+        ("stride_h", stride_h),
+        ("stride_w", stride_w),
+        ("dilation_h", dilation_h),
+        ("dilation_w", dilation_w),
+        ("pad_top", pad_top),
+        ("pad_bottom", pad_bottom),
+        ("pad_left", pad_left),
+        ("pad_right", pad_right),
+        ("repeat_time", repeat_time),
+        ("repeat_mode", repeat_mode),
+    ):
+        if not isinstance(value, int):
+            raise TypeError(
+                f"pto.mte_l1_l0a_3d: {name} is not a compile-time constant; "
+                "pass both repeat_source_stride and dst_stride explicitly when "
+                "using dynamic values"
+            )
+    effective_h = (filter_h - 1) * dilation_h + 1
+    effective_w = (filter_w - 1) * dilation_w + 1
+    output_h = (fmap_h + pad_top + pad_bottom - effective_h) // stride_h + 1
+    output_w = (fmap_w + pad_left + pad_right - effective_w) // stride_w + 1
+    total_m = output_h * output_w
+    if dst_stride is None:
+        dst_stride = (total_m + 15) // 16
+    if repeat_source_stride is None:
+        m_step = (total_m + repeat_time - 1) // repeat_time
+        if repeat_mode == 0:
+            repeat_source_stride = (m_step + 15) // 16
+        else:
+            elem_type = _pointer_element_type(source, context="mte_l1_l0a_3d")
+            element_bytes = _element_bytewidth(elem_type)
+            c0_size = 32 // element_bytes
+            k_step = (
+                (channel_size * filter_h * filter_w + c0_size - 1)
+                // c0_size
+                * c0_size
+            )
+            repeat_source_stride = k_step // c0_size
+    return repeat_source_stride, dst_stride
+
+
+@_explicit_mode_only("pto.mte_l1_l0a_3d(...)")
+def mte_l1_l0a_3d(
+    source,
+    destination,
+    *,
+    fmap_h,
+    fmap_w,
+    filter_h,
+    filter_w,
+    channel_size,
+    stride_h=1,
+    stride_w=1,
+    dilation_h=1,
+    dilation_w=1,
+    pad_top=0,
+    pad_bottom=0,
+    pad_left=0,
+    pad_right=0,
+    m_start=0,
+    k_start=0,
+    repeat_time=1,
+    repeat_mode=0,
+    repeat_source_stride=None,
+    dst_stride=None,
+    dst_m_position=0,
+    transpose=False,
+):
+    """``pto.mte_l1_l0a_3d`` – L1 (NC1HWC0) to L0A 3D im2col load.
+
+    Semantic wrapper for A5 ``LOAD L1 TO L0A 3Dv2``. Expands into
+    ``pto.set_l3d_fmatrix`` / ``pto.set_padding`` / ``pto.set_l3d_rpt`` /
+    ``pto.load_l1_to_l0a_3d`` (one OP per intrinsic, set* first, load last).
+
+    Parameter semantics: fmap/filter/stride/dilation/pad/channel drive the im2col
+    geometry; repeat splits the load into per-iteration M chunks.  When supplied,
+    ``repeat_source_stride`` is in 16-row-block units (not rows) and
+    ``dst_stride`` in fractal-block units, matching the hardware semantics.
+    ``fmap_h/fmap_w/filter_h/filter_w/channel_size`` are required; all other
+    parameters have defaults. Geometry, constraint, and control-word layout
+    semantics are documented in ``docs/isa/micro-isa/16-cube-matmul.md``
+    (``pto.mte_l1_l0a_3d`` section).
+    """
+    transpose = _normalize_cube_transpose(transpose, context="mte_l1_l0a_3d")
+
+    def _i64(name, value):
+        return _coerce_i64(value, context=f"mte_l1_l0a_3d {name}")
+
+    operands = [
+        unwrap_surface_value(source),
+        unwrap_surface_value(destination),
+        _i64("fmap_h", fmap_h),
+        _i64("fmap_w", fmap_w),
+        _i64("filter_h", filter_h),
+        _i64("filter_w", filter_w),
+        _i64("channel_size", channel_size),
+        _i64("stride_h", stride_h),
+        _i64("stride_w", stride_w),
+        _i64("dilation_h", dilation_h),
+        _i64("dilation_w", dilation_w),
+        _i64("pad_top", pad_top),
+        _i64("pad_bottom", pad_bottom),
+        _i64("pad_left", pad_left),
+        _i64("pad_right", pad_right),
+        _i64("m_start", m_start),
+        _i64("k_start", k_start),
+        _i64("repeat_time", repeat_time),
+        _i64("repeat_mode", repeat_mode),
+        _i64("dst_m_position", dst_m_position),
+    ]
+    # ``repeat_source_stride``/``dst_stride`` travel together at IR level;
+    # when only one is supplied, derive the other from the constant geometry.
+    if repeat_source_stride is not None or dst_stride is not None:
+        if repeat_source_stride is None or dst_stride is None:
+            repeat_source_stride, dst_stride = _derive_l3d_stride_defaults(
+                source=source,
+                fmap_h=fmap_h,
+                fmap_w=fmap_w,
+                filter_h=filter_h,
+                filter_w=filter_w,
+                channel_size=channel_size,
+                stride_h=stride_h,
+                stride_w=stride_w,
+                dilation_h=dilation_h,
+                dilation_w=dilation_w,
+                pad_top=pad_top,
+                pad_bottom=pad_bottom,
+                pad_left=pad_left,
+                pad_right=pad_right,
+                repeat_time=repeat_time,
+                repeat_mode=repeat_mode,
+                repeat_source_stride=repeat_source_stride,
+                dst_stride=dst_stride,
+            )
+        operands.append(_i64("repeat_source_stride", repeat_source_stride))
+        operands.append(_i64("dst_stride", dst_stride))
+
+    _pto.MteL1L0a3dOp(*operands, transpose=transpose)
 
 
 @_explicit_mode_only("pto.mte_l0c_l1(...)")

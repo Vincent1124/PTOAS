@@ -2164,6 +2164,67 @@ class VectorCubeSurfaceTest(unittest.TestCase):
         self.assertEqual(reserve_op.call_args.args[3], True)
         self.assertEqual(import_op.call_args.args, ("fifo", "vector_kernel"))
 
+    def test_mte_l1_l0a_3d_dynamic_geometry_requires_explicit_stride_pair(self):
+        # The (repeat_source_stride, dst_stride) pair travels together at IR
+        # level; when only one is supplied the other is derived from the
+        # geometry, which must then be compile-time constants. A dynamic (SSA)
+        # geometry with a half pair must fail fast instead of silently
+        # deriving nonsense defaults.
+        source = object()
+        destination = object()
+        dynamic = object()  # stands for a dynamic SSA value
+
+        def coerce(value, *, context):
+            return value
+
+        with patch_ops("_require_explicit_mode"), \
+             patch_ops("unwrap_surface_value", side_effect=_identity), \
+             patch_ops("_coerce_i64", side_effect=coerce), \
+             patch.object(pto_dialect, "MteL1L0a3dOp") as load_3d:
+            with self.assertRaisesRegex(
+                TypeError, "pass both repeat_source_stride and dst_stride"
+            ):
+                pto.mte_l1_l0a_3d(
+                    source,
+                    destination,
+                    fmap_h=dynamic,
+                    fmap_w=dynamic,
+                    filter_h=dynamic,
+                    filter_w=dynamic,
+                    channel_size=dynamic,
+                    repeat_source_stride=16,
+                    dst_stride=None,
+                )
+            load_3d.assert_not_called()
+
+    def test_mte_l1_l0a_3d_derives_missing_stride_from_constant_geometry(self):
+        # Full geometry constants with only dst_stride given: the expansion
+        # still gets a complete pair, so the wrapper IR keeps both operands.
+        source = object()
+        destination = object()
+
+        def coerce(value, *, context):
+            return f"{context}:{value}"
+
+        with patch_ops("_require_explicit_mode"), \
+             patch_ops("unwrap_surface_value", side_effect=_identity), \
+             patch_ops("_coerce_i64", side_effect=coerce), \
+             patch.object(pto_dialect, "MteL1L0a3dOp") as load_3d:
+            pto.mte_l1_l0a_3d(
+                source,
+                destination,
+                fmap_h=8,
+                fmap_w=8,
+                filter_h=3,
+                filter_w=3,
+                channel_size=16,
+                dst_stride=4,
+            )
+        operands = load_3d.call_args.args
+        # M = 6x6 = 36 -> repeat_source_stride = ceil(36/16) = 3 16-row blocks.
+        self.assertEqual(operands[20], "mte_l1_l0a_3d repeat_source_stride:3")
+        self.assertEqual(operands[21], "mte_l1_l0a_3d dst_stride:4")
+
 
 if __name__ == "__main__":
     unittest.main()

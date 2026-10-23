@@ -56,7 +56,8 @@ void markIllegalVPTOConfigOps(ConversionTarget &target) {
                       pto::SetLoop1StrideOutToL1Op, pto::SetLoopSizeOutToL1Op, pto::SetMte2NzParaOp,
                       pto::SetPadValOutToL1Op, pto::SetReluAlphaOp, pto::SetFixClipReluOp, pto::SetFpcOp,
                       pto::SetStoreAtomicCfgOp, pto::SetAtomicS32Op, pto::SetAtomicS8Op, pto::SetCtrlOp,
-                      pto::StoreVfSimtInfoOp, pto::SetMovPadValOp, pto::SetQuantPreOp>();
+                      pto::StoreVfSimtInfoOp, pto::SetMovPadValOp, pto::SetQuantPreOp,
+                      pto::SetL3dFmatrixOp, pto::SetPaddingOp, pto::SetL3dRptOp>();
   target.addIllegalOp<pto::Sbitset0Op, pto::Sbitset1Op>();
 }
 
@@ -90,7 +91,7 @@ void markIllegalVPTOArithmeticAndCopyOps(ConversionTarget &target) {
       pto::LoadCbufToCbMxOp, pto::CopyMatrixCcToGmOp, pto::CopyMatrixCcToCbufOp, pto::CopyMatrixCcToUbOp,
       pto::CopyCbufToBtOp, pto::CopyCbufToFbufOp, pto::CopyGmToCbufMultiNd2NzOp, pto::CopyGmToCbufMultiDn2NzOp,
       pto::MadOp, pto::MadAccOp, pto::MadBiasOp, pto::MadMxOp, pto::MadMxAccOp, pto::MadMxBiasOp, pto::MadRawOp,
-      pto::MadBiasRawOp, pto::MadMxRawOp, pto::MadMxBiasRawOp>();
+      pto::MadBiasRawOp, pto::MadMxRawOp, pto::MadMxBiasRawOp, pto::LoadL1L0a3dOp>();
 }
 
 void configureVPTOOpLoweringTarget(ConversionTarget &target, StringRef march) {

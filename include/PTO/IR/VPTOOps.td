@@ -3493,6 +3493,89 @@ def PTO_MteL1L0bOp : PTO_MteOp<"mte_l1_l0b", [
   let hasCustomAssemblyFormat = 1;
 }
 
+// === A5 3D im2col load family (pto.mte_l1_l0a_3d) ===
+def PTO_MteL1L0a3dOp : PTO_MteOp<"mte_l1_l0a_3d", [
+    AttrSizedOperandSegments,
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+  ]> {
+  let arguments = (ins
+    PTO_BufferLikeType:$source,
+    PTO_BufferLikeType:$destination,
+    I64:$fmap_h,
+    I64:$fmap_w,
+    I64:$filter_h,
+    I64:$filter_w,
+    I64:$channel_size,
+    I64:$stride_h,
+    I64:$stride_w,
+    I64:$dilation_h,
+    I64:$dilation_w,
+    I64:$pad_top,
+    I64:$pad_bottom,
+    I64:$pad_left,
+    I64:$pad_right,
+    I64:$m_start,
+    I64:$k_start,
+    I64:$repeat_time,
+    I64:$repeat_mode,
+    I64:$dst_m_position,
+    Optional<I64>:$repeat_source_stride,
+    Optional<I64>:$dst_stride,
+    DefaultValuedAttr<BoolAttr, "false">:$transpose
+  );
+  let results = (outs);
+  let hasVerifier = 1;
+  let assemblyFormat = [{
+    $source `,` $destination `,`
+    $fmap_h `,` $fmap_w `,` $filter_h `,` $filter_w `,` $channel_size `,`
+    $stride_h `,` $stride_w `,` $dilation_h `,` $dilation_w `,`
+    $pad_top `,` $pad_bottom `,` $pad_left `,` $pad_right `,`
+    $m_start `,` $k_start `,` $repeat_time `,` $repeat_mode `,` $dst_m_position
+    (`,` $repeat_source_stride^ `,` $dst_stride)?
+    attr-dict `:` type($source) `,` type($destination)
+  }];
+}
+
+def PTO_LoadL1L0a3dOp : PTO_MteOp<"load_l1_to_l0a_3d", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+  ]> {
+  let arguments = (ins
+    AnyType:$source,
+    AnyType:$destination,
+    I64:$m_start, I64:$k_start, I64:$m_step, I64:$k_step,
+    I64:$stride_w, I64:$stride_h, I64:$filter_w, I64:$filter_h,
+    I64:$dilation_w, I64:$dilation_h, I64:$channel_size,
+    DefaultValuedAttr<BoolAttr, "false">:$transpose,
+    OptionalAttr<TypeAttr>:$element_type
+  );
+  let results = (outs);
+  let hasVerifier = 1;
+  let assemblyFormat = [{
+    $source `,` $destination `,` $m_start `,` $k_start `,` $m_step `,` $k_step `,`
+    $stride_w `,` $stride_h `,` $filter_w `,` $filter_h `,`
+    $dilation_w `,` $dilation_h `,` $channel_size attr-dict `:`
+    type($source) `,` type($destination)
+  }];
+}
+
+def PTO_SetL3dFmatrixOp : PTO_MicroOp<"set_l3d_fmatrix", []> {
+  let arguments = (ins I64:$config);
+  let results = (outs);
+  let assemblyFormat = [{$config attr-dict}];
+}
+
+def PTO_SetPaddingOp : PTO_MicroOp<"set_padding", []> {
+  let arguments = (ins I64:$config);
+  let results = (outs);
+  let assemblyFormat = [{$config attr-dict}];
+}
+
+def PTO_SetL3dRptOp : PTO_MicroOp<"set_l3d_rpt", []> {
+  let arguments = (ins I64:$config);
+  let results = (outs);
+  let assemblyFormat = [{$config attr-dict}];
+}
+
 def PTO_MteL1L0aMxOp : PTO_MteOp<"mte_l1_l0a_mx", [
     AttrSizedOperandSegments,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>

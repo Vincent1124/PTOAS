@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto \
+// RUN:   --mlir-print-ir-after=vpto-expand-wrapper-ops %s -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s
+
+// Dynamic-geometry coverage: every control is an SSA value (not a constant),
+// so expansion must derive m_step/k_step/dst_stride/repeat_source_stride with
+// an arith chain instead of folding at compile time.
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @mte_l1_l0a_3d_expand_dynamic(
+      %src: !pto.ptr<f16, l1>, %dst: !pto.ptr<f16, l0a>,
+      %fmap_h: i64, %fmap_w: i64, %filter_h: i64, %filter_w: i64,
+      %channel: i64, %stride_h: i64, %stride_w: i64,
+      %dilation_h: i64, %dilation_w: i64,
+      %pad_top: i64, %pad_bottom: i64, %pad_left: i64, %pad_right: i64,
+      %m_start: i64, %k_start: i64, %repeat_time: i64, %repeat_mode: i64,
+      %dst_m_position: i64) attributes {pto.kernel} {
+    pto.mte_l1_l0a_3d %src, %dst, %fmap_h, %fmap_w, %filter_h, %filter_w, %channel,
+      %stride_h, %stride_w, %dilation_h, %dilation_w,
+      %pad_top, %pad_bottom, %pad_left, %pad_right,
+      %m_start, %k_start, %repeat_time, %repeat_mode, %dst_m_position
+      : !pto.ptr<f16, l1>, !pto.ptr<f16, l0a>
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @mte_l1_l0a_3d_expand_dynamic(
+// CHECK: arith.maxsi
+// CHECK: arith.subi
+// CHECK: arith.muli
+// CHECK: arith.divui
+// CHECK: arith.select
+// CHECK: pto.set_l3d_fmatrix %{{.*}}
+// CHECK-NEXT: pto.set_padding %{{.*}}
+// CHECK-NEXT: pto.set_l3d_rpt %{{.*}}
+// CHECK-NEXT: pto.load_l1_to_l0a_3d %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : !pto.ptr<f16, l1>, !pto.ptr<f16, l0a>

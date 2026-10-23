@@ -1,0 +1,359 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not pto-test-opt %s -split-input-file 2>&1 | FileCheck %s
+
+module {
+  func.func @mte_l1_l0a_3d_rejects_zero_repeat(
+      %src: !pto.ptr<f16, mat>, %dst: !pto.ptr<f16, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c3 = arith.constant 3 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c8, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c0, %c0, %c0
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, left>
+    return
+  }
+}
+
+// CHECK: 'pto.mte_l1_l0a_3d' op repeat_time must be greater than zero
+
+// -----
+
+module {
+  func.func @mte_l1_l0a_3d_rejects_small_padded_fmap(
+      %src: !pto.ptr<f16, mat>, %dst: !pto.ptr<f16, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c2 = arith.constant 2 : i64
+    %c3 = arith.constant 3 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c2, %c2, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, left>
+    return
+  }
+}
+
+// CHECK: 'pto.mte_l1_l0a_3d' op padded feature map smaller than dilated kernel 3x3
+
+
+
+// -----
+
+module {
+  func.func @mte_l1_l0a_3d_rejects_zero_dst_stride(
+      %src: !pto.ptr<f16, mat>, %dst: !pto.ptr<f16, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c3 = arith.constant 3 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c8, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0, %c3, %c0
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, left>
+    return
+  }
+}
+
+// CHECK: 'pto.mte_l1_l0a_3d' op dst_stride must be greater than zero
+
+// -----
+
+module {
+  func.func @mte_l1_l0a_3d_rejects_mismatched_element_types(
+      %src: !pto.ptr<f16, mat>, %dst: !pto.ptr<bf16, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c3 = arith.constant 3 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c8, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+      : !pto.ptr<f16, mat>, !pto.ptr<bf16, left>
+    return
+  }
+}
+
+// CHECK: 'pto.mte_l1_l0a_3d' op requires source and destination element types to match
+
+// -----
+
+module {
+  func.func @load_l1_to_l0a_3d_rejects_mismatched_element_metadata(
+      %src: !pto.ptr<f16, mat>, %dst: !pto.ptr<f16, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c3 = arith.constant 3 : i64
+    %c16 = arith.constant 16 : i64
+    pto.load_l1_to_l0a_3d %src, %dst, %c0, %c0, %c1, %c16, %c1, %c1, %c3, %c3, %c1, %c1, %c16
+      {element_type = bf16}
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, left>
+    return
+  }
+}
+
+// CHECK: 'pto.load_l1_to_l0a_3d' op requires element_type to match source and destination element type
+
+// -----
+
+module {
+  func.func @mte_l1_l0a_3d_rejects_derived_m_extent_overflow(
+      %src: !pto.ptr<f16, mat>, %dst: !pto.ptr<f16, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c256 = arith.constant 256 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c256, %c256, %c1, %c1, %c1, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, left>
+    return
+  }
+}
+
+// CHECK: 'pto.mte_l1_l0a_3d' op derived M extent must be < 2^15, got 65536
+
+// -----
+
+module {
+  func.func @mte_l1_l0a_3d_rejects_derived_k_step_overflow(
+      %src: !pto.ptr<f16, mat>, %dst: !pto.ptr<f16, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c4 = arith.constant 4 : i64
+    %c16384 = arith.constant 16384 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c4, %c4, %c4, %c4, %c16384, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, left>
+    return
+  }
+}
+
+// CHECK: 'pto.mte_l1_l0a_3d' op derived k_step out of range [1, 65535]
+
+// -----
+
+module {
+  func.func @mte_l1_l0a_3d_rejects_fp4_v1(
+      %src: !pto.ptr<!pto.f4E2M1x2, mat>, %dst: !pto.ptr<!pto.f4E2M1x2, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c3 = arith.constant 3 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c8, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+      : !pto.ptr<!pto.f4E2M1x2, mat>, !pto.ptr<!pto.f4E2M1x2, left>
+    return
+  }
+}
+
+// CHECK: 'pto.mte_l1_l0a_3d' op requires f16, bf16, f32, or 8-bit integer element type
+
+// -----
+
+module {
+  func.func @mte_l1_l0a_3d_rejects_repeat_k_direction(
+      %src: !pto.ptr<f16, mat>, %dst: !pto.ptr<f16, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c2 = arith.constant 2 : i64
+    %c3 = arith.constant 3 : i64
+    %c10 = arith.constant 10 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c10, %c10, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c2, %c1, %c0
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, left>
+    return
+  }
+}
+
+// CHECK: 'pto.mte_l1_l0a_3d' op repeat_time>1 is only supported with repeat_mode=0
+
+// -----
+
+module {
+  func.func @mte_l1_l0a_3d_rejects_repeat_uneven_m(
+      %src: !pto.ptr<f16, mat>, %dst: !pto.ptr<f16, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c3 = arith.constant 3 : i64
+    %c5 = arith.constant 5 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c8, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c5, %c0, %c0
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, left>
+    return
+  }
+}
+
+// CHECK: 'pto.mte_l1_l0a_3d' op repeat_time=5 must evenly divide the derived M extent 36
+
+// -----
+
+module {
+  func.func @mte_l1_l0a_3d_rejects_repeat_chunk_unaligned(
+      %src: !pto.ptr<f16, mat>, %dst: !pto.ptr<f16, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c2 = arith.constant 2 : i64
+    %c3 = arith.constant 3 : i64
+    %c8 = arith.constant 8 : i64
+    %c10 = arith.constant 10 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c10, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c2, %c0, %c0
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, left>
+    return
+  }
+}
+
+// CHECK: 'pto.mte_l1_l0a_3d' op repeat chunk (M extent / repeat_time) = 24 must be a multiple of 16
+
+// -----
+
+module {
+  func.func @mte_l1_l0a_3d_rejects_repeat_window_overflow(
+      %src: !pto.ptr<f16, mat>, %dst: !pto.ptr<f16, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c2 = arith.constant 2 : i64
+    %c3 = arith.constant 3 : i64
+    %c4 = arith.constant 4 : i64
+    %c8 = arith.constant 8 : i64
+    %c10 = arith.constant 10 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c10, %c10, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c2, %c0, %c0, %c8, %c4
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, left>
+    return
+  }
+}
+
+// CHECK: 'pto.mte_l1_l0a_3d' op repeat window exceeds the derived M extent
+
+// -----
+
+module {
+  func.func @mte_l1_l0a_3d_rejects_m_start_overflow(
+      %src: !pto.ptr<f16, mat>, %dst: !pto.ptr<f16, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c3 = arith.constant 3 : i64
+    %c4 = arith.constant 4 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c8, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c4, %c0, %c1, %c0, %c0
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, left>
+    return
+  }
+}
+
+// CHECK: 'pto.mte_l1_l0a_3d' op m_start + m_step exceeds the derived M extent: 4 + 36 > 36
+
+// -----
+
+module {
+  func.func @mte_l1_l0a_3d_rejects_k_start_overflow(
+      %src: !pto.ptr<f16, mat>, %dst: !pto.ptr<f16, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c3 = arith.constant 3 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c8, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c8, %c1, %c0, %c0
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, left>
+    return
+  }
+}
+
+// CHECK: 'pto.mte_l1_l0a_3d' op k_start must be zero: split-K is not supported by the 3D load lowering, got k_start=8
+
+// -----
+
+module {
+  func.func @mte_l1_l0a_3d_rejects_filter_footprint(
+      %src: !pto.ptr<f16, mat>, %dst: !pto.ptr<f16, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c511 = arith.constant 511 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c511, %c511, %c511, %c511, %c1, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, left>
+    return
+  }
+}
+
+// CHECK: 'pto.mte_l1_l0a_3d' op filter footprint must be < 2^16 elements, got 261121
+
+// -----
+
+module {
+  func.func @mte_l1_l0a_3d_rejects_l1_capacity(
+      %src: !pto.ptr<f16, mat>, %dst: !pto.ptr<f16, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c32 = arith.constant 32 : i64
+    %c512 = arith.constant 512 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c512, %c512, %c1, %c1, %c32, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, left>
+    return
+  }
+}
+
+// CHECK: 'pto.mte_l1_l0a_3d' op source feature map exceeds the L1 capacity: 16777216 bytes > 524288
+
+// -----
+
+module {
+  func.func @mte_l1_l0a_3d_rejects_zero_stride(
+      %src: !pto.ptr<f16, mat>, %dst: !pto.ptr<f16, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c3 = arith.constant 3 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c8, %c3, %c3, %c16, %c0, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, left>
+    return
+  }
+}
+
+// CHECK: 'pto.mte_l1_l0a_3d' op stride_h must be greater than zero
+
+// -----
+
+module {
+  func.func @mte_l1_l0a_3d_rejects_m_start_with_default_repeat(
+      %src: !pto.ptr<f16, mat>, %dst: !pto.ptr<f16, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c2 = arith.constant 2 : i64
+    %c4 = arith.constant 4 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    // M = 8x8 = 64, repeat_time=2, chunk=32, m_start=4: with the default
+    // derived rss (ceil(32/16)=2 16-row blocks) the window 4+32+32=68 exceeds
+    // the M extent 64. The explicit-stride path allows split windows, the
+    // default-derived path must not silently read past the extent.
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c8, %c1, %c1, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c4, %c0, %c2, %c0, %c0
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, left>
+    return
+  }
+}
+
+// CHECK: 'pto.mte_l1_l0a_3d' op repeat window exceeds the derived M extent: m_start=4, repeat_source_stride=2 (derived 16-row blocks), repeat_time=2, chunk=32, M extent=64
+
+// -----
+
+module {
+  func.func @mte_l1_l0a_3d_rejects_upper_filter(
+      %src: !pto.ptr<f16, mat>, %dst: !pto.ptr<f16, left>) {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c3 = arith.constant 3 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    %c512 = arith.constant 512 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c8, %c512, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, left>
+    return
+  }
+}
+
+// CHECK: 'pto.mte_l1_l0a_3d' op filter_h must be <= 511 to fit the hardware control field

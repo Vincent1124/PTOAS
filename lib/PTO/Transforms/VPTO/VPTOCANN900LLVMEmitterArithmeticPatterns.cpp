@@ -1024,6 +1024,127 @@ private:
   LoweringState &state;
 };
 
+// Packs one control field into a 64-bit control word: masks, shifts, and
+// ORs the value into `result`, shared by the 3D pck0/pck1 builders.
+static LogicalResult packI64ControlField(Operation *anchor, OpBuilder &builder,
+                                        Value value, uint64_t mask,
+                                        uint64_t shift, Value &result) {
+  Value i64 = castIntegerLikeTo(anchor, value, builder.getI64Type());
+  if (!i64) {
+    return failure();
+  }
+  i64 = builder.create<arith::AndIOp>(anchor->getLoc(), i64,
+                                      getI64Constant(builder, anchor->getLoc(), mask));
+  if (shift != 0) {
+    i64 = builder.create<arith::ShLIOp>(anchor->getLoc(), i64,
+                                        getI64Constant(builder, anchor->getLoc(), shift));
+  }
+  result = builder.create<arith::OrIOp>(anchor->getLoc(), result, i64);
+  return success();
+}
+
+static FailureOr<Value> packL1L0a3dPck0(Operation *anchor, Value mStart, Value kStart, Value mStep, Value kStep) {
+  OpBuilder builder(anchor);
+  builder.setInsertionPoint(anchor);
+  Value result = getI64Constant(builder, anchor->getLoc(), 0);
+  if (failed(packI64ControlField(anchor, builder, kStep, 0xffff, 0, result)) ||
+      failed(packI64ControlField(anchor, builder, mStep, 0xffff, 16, result)) ||
+      failed(packI64ControlField(anchor, builder, kStart, 0xffff, 32, result)) ||
+      failed(packI64ControlField(anchor, builder, mStart, 0xffff, 48, result))) {
+    return failure();
+  }
+  return result;
+}
+
+static FailureOr<Value> packL1L0a3dPck1(Operation *anchor, Value strideW, Value strideH, Value filterW,
+                                        Value filterH, Value dilationW, Value dilationH, Value channelSize,
+                                        bool transpose, int64_t fmatrixMode) {
+  OpBuilder builder(anchor);
+  builder.setInsertionPoint(anchor);
+  Value result = getI64Constant(builder, anchor->getLoc(), 0);
+  if (failed(packI64ControlField(anchor, builder, strideW, 0x3f, 0, result)) ||
+      failed(packI64ControlField(anchor, builder, strideH, 0x3f, 6, result)) ||
+      failed(packI64ControlField(anchor, builder, filterW, 0xff, 12, result)) ||
+      failed(packI64ControlField(anchor, builder, filterH, 0xff, 20, result)) ||
+      failed(packI64ControlField(anchor, builder, dilationW, 0xff, 28, result)) ||
+      failed(packI64ControlField(anchor, builder, dilationH, 0xff, 36, result)) ||
+      failed(packI64ControlField(anchor, builder,
+                                 getI64Constant(builder, anchor->getLoc(), transpose ? 1 : 0),
+                                 1, 46, result)) ||
+      failed(packI64ControlField(anchor, builder,
+                                 getI64Constant(builder, anchor->getLoc(), fmatrixMode),
+                                 1, 47, result)) ||
+      failed(packI64ControlField(anchor, builder, channelSize, 0xffff, 48, result))) {
+    return failure();
+  }
+
+  auto addHighFilterBit = [&](Value value, uint64_t shift) -> LogicalResult {
+    Value i64 = castIntegerLikeTo(anchor, value, builder.getI64Type());
+    if (!i64) {
+      return failure();
+    }
+    i64 = builder.create<arith::ShRUIOp>(anchor->getLoc(), i64, getI64Constant(builder, anchor->getLoc(), 8));
+    i64 = builder.create<arith::AndIOp>(anchor->getLoc(), i64, getI64Constant(builder, anchor->getLoc(), 1));
+    i64 = builder.create<arith::ShLIOp>(anchor->getLoc(), i64, getI64Constant(builder, anchor->getLoc(), shift));
+    result = builder.create<arith::OrIOp>(anchor->getLoc(), result, i64);
+    return success();
+  };
+  if (failed(addHighFilterBit(filterW, 44)) || failed(addHighFilterBit(filterH, 45))) {
+    return failure();
+  }
+  return result;
+}
+
+class LowerLoadL1L0a3dOpPattern final : public OpConversionPattern<pto::LoadL1L0a3dOp> {
+public:
+  explicit LowerLoadL1L0a3dOpPattern(const TypeConverter &typeConverter, MLIRContext *context, LoweringState &state)
+      : OpConversionPattern<pto::LoadL1L0a3dOp>(typeConverter, context), state(state) {}
+
+  LogicalResult matchAndRewrite(pto::LoadL1L0a3dOp op, pto::LoadL1L0a3dOp::Adaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    Value sourceRaw = adaptor.getSource();
+    Value destinationRaw = adaptor.getDestination();
+    if (!sourceRaw || !destinationRaw || !isa<LLVM::LLVMPointerType>(sourceRaw.getType()) ||
+        !isa<LLVM::LLVMPointerType>(destinationRaw.getType())) {
+      return rewriter.notifyMatchFailure(op, "expected LLVM pointer src/dst");
+    }
+    FailureOr<Value> source = reinterpretPointerToAddrSpace(
+        op, sourceRaw, static_cast<unsigned>(pto::AddressSpace::MAT));
+    FailureOr<Value> destination = reinterpretPointerToAddrSpace(
+        op, destinationRaw, static_cast<unsigned>(pto::AddressSpace::LEFT));
+    if (failed(source) || failed(destination)) {
+      return rewriter.notifyMatchFailure(op, "failed to map 3D load pointer spaces");
+    }
+    FailureOr<Value> pck0 = packL1L0a3dPck0(op, adaptor.getMStart(), adaptor.getKStart(), adaptor.getMStep(),
+                                            adaptor.getKStep());
+    FailureOr<Value> pck1 = packL1L0a3dPck1(op, adaptor.getStrideW(), adaptor.getStrideH(), adaptor.getFilterW(),
+                                            adaptor.getFilterH(), adaptor.getDilationW(), adaptor.getDilationH(),
+                                            adaptor.getChannelSize(), op.getTranspose(), 0);
+    if (failed(pck0) || failed(pck1)) {
+      return rewriter.notifyMatchFailure(op, "failed to pack 3D load controls");
+    }
+    Type elementType = op.getElementType().value_or(Type());
+    if (!elementType) {
+      return rewriter.notifyMatchFailure(op, "missing 3D load element type metadata");
+    }
+    FailureOr<StringRef> calleeName = buildLoadL1L0a3dCallee(op.getContext(), elementType);
+    if (failed(calleeName)) {
+      return rewriter.notifyMatchFailure(op, "unsupported load_l1_to_l0a_3d element type");
+    }
+    Type i64Ty = rewriter.getI64Type();
+    auto funcType = rewriter.getFunctionType(
+        TypeRange{destination->getType(), source->getType(), i64Ty, i64Ty}, TypeRange{});
+    rewriter.create<func::CallOp>(op.getLoc(), *calleeName, TypeRange{},
+                                  ValueRange{*destination, *source, *pck0, *pck1});
+    state.plannedDecls.push_back(PlannedDecl{calleeName->str(), funcType});
+    rewriter.eraseOp(op);
+    return success();
+  }
+
+private:
+  LoweringState &state;
+};
+
 template <typename LoadOp>
 static FailureOr<std::pair<Value, Value>> mapLoadCbufToS4Pointers(LoadOp op, typename LoadOp::Adaptor adaptor) {
   Value sourceRaw = adaptor.getSource();
@@ -1881,7 +2002,8 @@ void populateVPTOArithmeticPatterns(const VPTOTypeConverter &typeConverter, Rewr
                LowerCopyCbufToFbufOpPattern, LowerCopyGmToCbufMultiOpPattern<pto::CopyGmToCbufMultiNd2NzOp>,
                LowerCopyGmToCbufMultiOpPattern<pto::CopyGmToCbufMultiDn2NzOp>, LowerMadRawPattern<pto::MadRawOp>,
                LowerMadRawPattern<pto::MadBiasRawOp>, LowerMadRawPattern<pto::MadMxRawOp>,
-               LowerMadRawPattern<pto::MadMxBiasRawOp>, LowerCopyOpPattern<pto::CopyGmToUbufOp>,
+               LowerMadRawPattern<pto::MadMxBiasRawOp>, LowerLoadL1L0a3dOpPattern,
+               LowerCopyOpPattern<pto::CopyGmToUbufOp>,
                LowerCopyOpPattern<pto::CopyUbufToGmOp>, LowerCopyUbufToUbufOpPattern, LowerCopyCbufToUbufOpPattern,
                LowerCopyUbufToCbufOpPattern, LowerCreateCbufMatrixOpPattern>(typeConverter, patterns.getContext(),
                                                                              state);

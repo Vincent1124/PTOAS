@@ -1252,6 +1252,49 @@ pto.mte_l0c_gm(
 
 ---
 
+#### `pto.mte_l1_l0a_3d(src: PtrType, dst: PtrType, *, fmap_h: int, fmap_w: int, filter_h: int, filter_w: int, channel_size: int, stride_h: int = 1, stride_w: int = 1, dilation_h: int = 1, dilation_w: int = 1, pad_top: int = 0, pad_bottom: int = 0, pad_left: int = 0, pad_right: int = 0, m_start: int = 0, k_start: int = 0, repeat_time: int = 1, repeat_mode: int = 0, repeat_source_stride: int | None = None, dst_stride: int | None = None, dst_m_position: int = 0, transpose: bool = False) -> None`
+
+**Description**: 3D im2col load from an NC1HWC0 image in L1 into the L0A left
+operand buffer (A5 `LOAD L1 TO L0A 3Dv2`). The hardware slides the
+`filter_h x filter_w` window over the virtually padded feature map with the
+given stride/dilation and flattens `channel_size` channels per window
+position, producing the im2col `M x K` matrix consumed by MMAD. PTODSL emits
+the `mte_l1_l0a_3d` wrapper IR whose parameters are SSA operands; the compiler
+expands it to `set_l3d_fmatrix` / `set_padding` / `set_l3d_rpt` /
+`load_l1_to_l0a_3d` (set* first, load last).
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `src` | `PtrType` (L1) | NC1HWC0 image source pointer |
+| `dst` | `PtrType` (L0A) | im2col destination pointer |
+| `fmap_h`, `fmap_w` | `int` in `1..32767` | Source feature-map height/width (elements) |
+| `filter_h`, `filter_w` | `int` in `1..511` | Convolution kernel height/width |
+| `channel_size` | `int` in `1..65535` | Channel count of one feature map |
+| `stride_h`, `stride_w` | `int` in `1..63` | Window stride (default 1) |
+| `dilation_h`, `dilation_w` | `int` in `1..255` | Window sampling dilation (default 1); camodel measures 0 as 1, but constant 0 is rejected at verification |
+| `pad_top` .. `pad_right` | `int` in `0..255` | Virtual padding on each side (default 0) |
+| `m_start`, `k_start` | `int` in `0..32767` / `0..65535` | Result-matrix start offsets; `k_start` must be 0 (split-K is not supported) (default 0) |
+| `repeat_time` | `int` in `1..255` | Hardware repeat count (default 1) |
+| `repeat_mode` | `int` `0`/`1` | Repeat direction: 0 = M, 1 = K (default 0) |
+| `repeat_source_stride`, `dst_stride` | `int | None` | Optional stride pair; `repeat_source_stride` is in 16-row-block units for M-direction repeat (in c0 blocks for K-direction, `k_step / c0_size`), `dst_stride` in fractal-block units; when both are omitted the compiler derives the hardware defaults from the load geometry |
+| `dst_m_position` | `int` | Destination fractal-block start (default 0) |
+| `transpose` | `bool` | Destination transpose (default False) |
+
+**Returns**: None (side-effect operation).
+
+`repeat_source_stride` and `dst_stride` travel as a pair in the wrapper IR.
+When exactly one of them is supplied and all geometry parameters are
+compile-time constants, PTODSL derives the other from the constant geometry
+and raises `TypeError` for dynamic (SSA) geometry with a half pair — pass both
+explicitly in that case. When both are omitted (constant or dynamic geometry),
+the IR expansion derives the pair from the load geometry automatically; the
+`TypeError` guard exists only because the PTODSL default derivation needs
+compile-time constants to compute them.
+
+---
+
 ### Cube data movement quick reference
 
 | Data Flow | Operation | Src Space | Dst Space |
@@ -1266,6 +1309,7 @@ pto.mte_l0c_gm(
 | L1 → L0B | `mte_l1_l0b` | l1 | l0b |
 | L1 → L0A (MX) | `mte_l1_l0a_mx` | l1 | l0a |
 | L1 → L0B (MX) | `mte_l1_l0b_mx` | l1 | l0b |
+| L1 → L0A (im2col 3D) | `mte_l1_l0a_3d` | l1 | l0a |
 | L1 → Bias table | `mte_l1_bt` | l1 | bt |
 | L1 → Factor buffer | `mte_l1_fb` | l1 | fb |
 | L0C → L1 | `mte_l0c_l1` | l0c | l1 |

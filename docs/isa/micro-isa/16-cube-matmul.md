@@ -147,6 +147,12 @@ pto.mad %lhs, %rhs, %dst, %m, %n, %k
 - Packed 4-bit integer data requires `%k` to select an even number of K
   elements.
 
+The `dsl-st` kernels pair this load with `pto.tmatmul`; their
+`dst_group=(1, 1, N, 0)` means `(group_count=1, loop2_stride=1,
+loop3_stride=N, loop4_stride=0)` (single group, L0C write-back grouped by
+the N axis) — the same `(group_count, loop2_stride, loop3_stride,
+loop4_stride)` tuple semantics as `pto.mte_gm_l1_frac` in the user guide.
+
 **Example:**
 
 ```mlir
@@ -809,6 +815,136 @@ pto.mte_l1_l0b %l1_b, %l0b, %c0_i64, %c4_i64, %c16_i64,
   %c4_i64, %c16_i64, %c16_i64 {transpose = true}
   : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0b>,
     i64, i64, i64, i64, i64, i64
+```
+
+---
+
+### `pto.mte_l1_l0a_3d`
+
+- **syntax:**
+```mlir
+pto.mte_l1_l0a_3d %src, %dst,
+    %fmap_h, %fmap_w, %filter_h, %filter_w, %channel_size,
+    %stride_h, %stride_w, %dilation_h, %dilation_w,
+    %pad_top, %pad_bottom, %pad_left, %pad_right,
+    %m_start, %k_start, %repeat_time, %repeat_mode, %dst_m_position
+    [, %repeat_source_stride, %dst_stride]
+  : !pto.ptr<T, l1>, !pto.ptr<T, l0a>
+```
+- **semantics:** Load an NC1HWC0 image from L1 `l1` and emit an im2col
+  `M x K` left tile into `l0a` for MMAD. The hardware derives
+  `M = H_o x W_o` and `K = channel_size x filter_h x filter_w` from the
+  convolution geometry (fmap/filter/stride/dilation/pad): it slides the
+  `filter_h x filter_w` window over the virtually padded feature map and
+  reads `channel_size` channels per window position, so each output row is
+  one window position flattened in `(kh, kw, c)` order (channel fastest:
+  `c` strides by 1, then `kw`, then `kh`). Out-of-bounds samples are filled
+  with the padding value. The
+  semantic wrapper expands to `set_l3d_fmatrix` / `set_padding` / `set_l3d_rpt` /
+  `load_l1_to_l0a_3d` (set* first, load last), targeting the A5
+  `LOAD L1 TO L0A 3Dv2` intrinsic family.
+
+**Parameter Table:**
+
+| Parameter | Width | Description |
+|-----------|-------|-------------|
+| `%src` | ptr | NC1HWC0 image source in `l1` |
+| `%dst` | ptr | im2col destination in `l0a` |
+| `%fmap_h`, `%fmap_w` | i64 | Source feature-map height / width (elements) |
+| `%filter_h`, `%filter_w` | i64 | Convolution kernel height / width |
+| `%channel_size` | i64 | Channel count of one feature map (third dimension) |
+| `%stride_h`, `%stride_w` | i64 | Window stride; default 1 |
+| `%dilation_h`, `%dilation_w` | i64 | Window sampling dilation; the interface requires an explicit value in `1..255` (measured on camodel: 0 behaves as 1, but 0 is rejected at verification); default 1 |
+| `%pad_top` .. `%pad_right` | i64 | Virtual padding on each side; default 0 |
+| `%m_start`, `%k_start` | i64 | Result-matrix start offsets; default 0 |
+| `%repeat_time` | i64 | Hardware repeat count; default 1 |
+| `%repeat_mode` | i64 | Repeat direction: 0 = M, 1 = K; default 0 |
+| `%dst_m_position` | i64 | Destination fractal-block start; default 0 |
+| `%repeat_source_stride`, `%dst_stride` | i64 | Optional stride pair; when omitted the expansion derives the hardware defaults from the load geometry |
+| `transpose` | attr | Optional boolean destination transpose |
+
+**Constraints:**
+
+- `%src` must be in `l1`, `%dst` must be in `l0a`.
+- Element type must be f16/bf16/f32 or 8-bit integer; the intrinsic variant
+  follows the element type (`f16` → `.f16`, `bf16` → `.bf16`, etc.).
+- Compile-time-constant operands are range-checked at verification:
+  `fmap_h/fmap_w` in `1..32767`, `filter_h/filter_w` in `1..511`,
+  `channel_size` in `1..65535`, `stride` in `1..63`, `dilation` in `1..255`,
+  `pad` in `0..255`, `m_start` in `0..32767`, `k_start` in `0..65535`,
+  `repeat_time` in `1..255`, `repeat_mode` in `0..1`,
+  `dst_m_position` in `0..65535`, `dst_stride` in `1..65535`; dynamic operands
+  defer to the hardware. The expansion normalizes dynamic inputs in three
+  distinct ways, documented so callers know which misuse is caught where:
+  - `dilation = 0` is normalized to `1` (camodel-measured behavior, not ISA spec);
+  - zero dynamic `stride` / `repeat_time` is clamped to `1` so the LLVM
+    `udiv` never sees a zero divisor (poison), matching the rejected
+    constant-zero cases — callers must still guarantee these values are
+    >= 1 for meaningful results;
+  - a dynamic padded-vs-effective geometry that is undersized (`padded <
+    effective`) clamps the difference to `0` (signed), so the derived M
+    cannot wrap to a huge value; callers must keep `padded >= effective`
+    for meaningful results.
+- Capacity rules (all against constant geometry): the source feature map must
+  fit the L1 image budget (`fmap_h * fmap_w * channel_size * element_bytes
+  <= 512 KB`), the filter footprint must be below `2^16` elements, and the
+  derived M extent must be below `2^15` rows; the derived `m_step`/`k_step`
+  must fit their 16-bit control fields (`1..65535`).
+- `k_start` must be 0: split-K is not supported by the current 3D load
+  lowering.
+- `repeat_time > 1` requires `repeat_mode = 0`, `M % repeat_time == 0`, and
+  a repeat chunk (`M / repeat_time`) that is a multiple of 16. The repeat
+  window `m_start + repeat_source_stride * 16 * (repeat_time - 1) + chunk`
+  must stay within the derived M extent; with the default-derived
+  `repeat_source_stride` (no explicit pair) this implies `m_start = 0`, while
+  an explicit stride pair permits split-M windows.
+- For a full (non-split) load the expansion transfers the whole derived M/K, so
+  `m_start`/`k_start` must be 0 (verified for constant operands).
+- `%repeat_source_stride`/`%dst_stride` travel as a pair at IR level; when
+  both are omitted the expansion derives `dst_stride = ceil(M/16)` and
+  `repeat_source_stride` in 16-row-block units (`ceil(m_step/16)` for
+  M-direction repeat, `k_step/c0_size` for K-direction).
+
+**Control word layout (emitted as the two `i64` args of the LOAD intrinsic):**
+
+The 3D load packs its controls into two 64-bit words; the field order differs
+from the 2D `LOAD L1 TO L0A` tile descriptor (which uses
+`m_start@0, k_start@16, m_step@32, k_step@40`), because the 3Dv2 instruction
+carries its tile geometry in separate `set_l3d_fmatrix`/`set_l3d_rpt` registers
+and only start/step remain in the load word:
+
+- `pck0` (load): `k_step@0 (16)`, `m_step@16 (16)`, `k_start@32 (16)`,
+  `m_start@48 (16)`.
+- `pck1` (load): `stride_w@0 (6)`, `stride_h@6 (6)`, `filter_w@12 (8)`,
+  `filter_h@20 (8)`, `dilation_w@28 (8)`, `dilation_h@36 (8)`,
+  `filter_w>>8@44 (1)`, `filter_h>>8@45 (1)`, `transpose@46 (1)`,
+  `fmatrix_mode@47 (1, always 0)`, `channel_size@48 (16)`.
+- `set_l3d_fmatrix` config: `fmap_w@0 (16)`, `fmap_h@16 (16)`, `pad_left@32 (8)`,
+  `pad_right@40 (8)`, `pad_top@48 (8)`, `pad_bottom@56 (8)`.
+- `set_l3d_rpt` config: `repeat_source_stride@0 (16)`, `repeat_time@16 (8)`,
+  `repeat_mode@24 (8)`, `dst_stride@32 (16)`, `dst_m_position@48 (16)`.
+
+The layout was reverse-engineered from camodel experiments; the exact hardware
+assignment of these fields is confirmed only to the extent that the emitted
+intrinsics execute on the simulator. `set_padding` carries a single zero
+padding value (no per-side pad-value parameter in the current interface).
+
+Numeric end-to-end validation in this repository covers f16 only: f32 and bf16
+compile and emit (lit coverage) but their simulator numeric paths are not
+validated here (the dsl-st cases were removed because the camodel simulator
+mis-handles their address/arithmetic paths); both remain to be validated on
+real hardware / CI with an NPU.
+
+**Example:**
+
+```mlir
+%c0 = arith.constant 0 : i64
+%c1 = arith.constant 1 : i64
+%c3 = arith.constant 3 : i64
+%c8 = arith.constant 8 : i64
+%c16 = arith.constant 16 : i64
+pto.mte_l1_l0a_3d %l1_a, %l0a, %c8, %c8, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+  : !pto.ptr<f16, l1>, !pto.ptr<f16, l0a>
 ```
 
 ---

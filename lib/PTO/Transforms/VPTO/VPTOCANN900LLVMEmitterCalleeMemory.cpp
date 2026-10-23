@@ -113,6 +113,26 @@ FailureOr<StringRef> buildLoadCbufToCaCallee(MLIRContext *context, Type sourceTy
   return StringAttr::get(context, "llvm.hivm.LOAD.L1.TO.L0A.2Dv2." + elem).getValue();
 }
 
+StringRef buildSetFmatrixCallee(MLIRContext *context, bool modeB) {
+  return StringAttr::get(context, modeB ? "llvm.hivm.SET.FMATRIX.B" : "llvm.hivm.SET.FMATRIX").getValue();
+}
+
+StringRef buildSetPaddingCallee(MLIRContext *context, bool modeB) {
+  return StringAttr::get(context, modeB ? "llvm.hivm.SET.PADDING.B" : "llvm.hivm.SET.PADDING").getValue();
+}
+
+StringRef buildSetL3dRptCallee(MLIRContext *context, bool modeB) {
+  return StringAttr::get(context, modeB ? "llvm.hivm.SET.L3D.RPT.B" : "llvm.hivm.SET.L3D.RPT").getValue();
+}
+
+FailureOr<StringRef> buildLoadL1L0a3dCallee(MLIRContext *context, Type sourceType) {
+  std::string elem = getL0LoadElementFragment(sourceType);
+  if (elem.empty()) {
+    return failure();
+  }
+  return StringAttr::get(context, "llvm.hivm.LOAD.L1.TO.L0A.3DV2.c310." + elem + ".C310.NO.DUAL").getValue();
+}
+
 FailureOr<StringRef> buildLoadCbufToCbCallee(MLIRContext *context, Type sourceType) {
   auto ptrType = dyn_cast<pto::PtrType>(sourceType);
   if (!ptrType) {

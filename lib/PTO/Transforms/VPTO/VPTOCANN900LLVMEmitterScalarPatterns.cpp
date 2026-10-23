@@ -423,6 +423,37 @@ private:
   LoweringState &state;
 };
 
+template <typename ConfigOp> class LowerL3dConfigOpPattern final : public OpConversionPattern<ConfigOp> {
+public:
+  explicit LowerL3dConfigOpPattern(const TypeConverter &typeConverter, MLIRContext *context, LoweringState &state)
+      : OpConversionPattern<ConfigOp>(typeConverter, context), state(state) {}
+
+  LogicalResult matchAndRewrite(ConfigOp op, typename ConfigOp::Adaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    Value config = adaptor.getConfig();
+    // L0B / B-mode variants are not implemented for the 3D load
+    // family; the callee builders keep the modeB switch for
+    // symmetry with the 2D path.
+    constexpr bool modeB = false;
+    StringRef calleeName;
+    if constexpr (std::is_same_v<ConfigOp, pto::SetL3dFmatrixOp>) {
+      calleeName = buildSetFmatrixCallee(op.getContext(), modeB);
+    } else if constexpr (std::is_same_v<ConfigOp, pto::SetPaddingOp>) {
+      calleeName = buildSetPaddingCallee(op.getContext(), modeB);
+    } else {
+      calleeName = buildSetL3dRptCallee(op.getContext(), modeB);
+    }
+    auto funcType = rewriter.getFunctionType(TypeRange{rewriter.getI64Type()}, TypeRange{});
+    rewriter.create<func::CallOp>(op.getLoc(), calleeName, TypeRange{}, config);
+    state.plannedDecls.push_back(PlannedDecl{calleeName.str(), funcType});
+    rewriter.eraseOp(op);
+    return success();
+  }
+
+private:
+  LoweringState &state;
+};
+
 class LowerStoreVfSimtInfoOpPattern final : public OpConversionPattern<pto::StoreVfSimtInfoOp> {
 public:
   explicit LowerStoreVfSimtInfoOpPattern(const TypeConverter &typeConverter, MLIRContext *context, LoweringState &state)
@@ -1892,7 +1923,9 @@ static void populateVPTOConfigAndSyncPatterns(const VPTOTypeConverter &typeConve
            LowerUnaryI64ConfigOpPattern<pto::SetLoop1StrideOutToL1Op>,
            LowerUnaryI64ConfigOpPattern<pto::SetLoopSizeOutToL1Op>, LowerUnaryI64ConfigOpPattern<pto::SetMte2NzParaOp>,
            LowerUnaryI64ConfigOpPattern<pto::SetPadValOutToL1Op>, LowerUnaryI64ConfigOpPattern<pto::SetFpcOp>,
-           LowerUnaryI64ConfigOpPattern<pto::SetStoreAtomicCfgOp>, LowerNullaryConfigOpPattern<pto::SetAtomicS32Op>,
+           LowerUnaryI64ConfigOpPattern<pto::SetStoreAtomicCfgOp>, LowerL3dConfigOpPattern<pto::SetL3dFmatrixOp>,
+           LowerL3dConfigOpPattern<pto::SetPaddingOp>, LowerL3dConfigOpPattern<pto::SetL3dRptOp>,
+           LowerNullaryConfigOpPattern<pto::SetAtomicS32Op>,
            LowerNullaryConfigOpPattern<pto::SetAtomicS8Op>, LowerPipeEventSyncOpPattern<pto::SetFlagOp>,
            LowerPipeEventSyncOpPattern<pto::WaitFlagOp>, LowerPipeEventDynSyncOpPattern<pto::SetFlagDynOp>,
            LowerPipeEventDynSyncOpPattern<pto::WaitFlagDynOp>, LowerBarrierOpPattern, LowerMemBarOpPattern,

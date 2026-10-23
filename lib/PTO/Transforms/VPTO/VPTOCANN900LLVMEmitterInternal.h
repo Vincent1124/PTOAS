@@ -506,6 +506,10 @@ FailureOr<StringRef> buildCopyGmToCbufCallee(MLIRContext *context, Type sourceTy
 FailureOr<StringRef> buildCopyGmToCbufMultiNd2NzCallee(MLIRContext *context, Type sourceType);
 FailureOr<StringRef> buildCopyGmToCbufMultiDn2NzCallee(MLIRContext *context, Type sourceType);
 FailureOr<StringRef> buildLoadCbufToCaCallee(MLIRContext *context, Type sourceType);
+StringRef buildSetFmatrixCallee(MLIRContext *context, bool modeB);
+StringRef buildSetPaddingCallee(MLIRContext *context, bool modeB);
+StringRef buildSetL3dRptCallee(MLIRContext *context, bool modeB);
+FailureOr<StringRef> buildLoadL1L0a3dCallee(MLIRContext *context, Type elementType);
 FailureOr<StringRef> buildLoadCbufToCbCallee(MLIRContext *context, Type sourceType);
 FailureOr<StringRef> buildLoadCbufToCaS4Callee(MLIRContext *context, Type sourceType);
 FailureOr<StringRef> buildLoadCbufToCbS4Callee(MLIRContext *context, Type sourceType);

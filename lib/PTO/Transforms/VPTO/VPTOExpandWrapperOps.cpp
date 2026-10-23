@@ -10,6 +10,7 @@
 #include "PTO/IR/PTO.h"
 #include "PTO/IR/PTOTypeUtils.h"
 #include "PTO/Transforms/Passes.h"
+#include "VPTOExpandL1L0a3d.h"
 #include "VPTOExpandMadOps.h"
 #include "VPTOExpandAsyncComm.h"
 
@@ -33,6 +34,7 @@ namespace pto {
 } // namespace mlir
 
 using namespace mlir;
+using namespace mlir::pto;
 
 namespace {
 
@@ -772,6 +774,14 @@ struct CbufControlMath {
                                                constant(divisor - 1));
     return rewriter.create<arith::DivUIOp>(loc, sum, constant(divisor));
   }
+
+  Value ceilDiv(Value value, Value divisor) const {
+    Value one = constant(1);
+    Value sum = rewriter.create<arith::AddIOp>(
+        loc, value, rewriter.create<arith::SubIOp>(loc, divisor, one));
+    return rewriter.create<arith::DivUIOp>(loc, sum, divisor);
+  }
+
 };
 
 struct LoadCbufControlQuery {
@@ -1492,6 +1502,87 @@ struct ExpandCubeLoadFracPattern : public OpRewritePattern<pto::MteGmL1FracOp> {
   }
 };
 
+// Emits the four expanded ops (set_fmatrix / set_padding / set_l3d_rpt /
+// load_l1_to_l0a_3d) for the 3D load with the derived controls.
+static void emitL1L0a3dLoadOps(PatternRewriter &rewriter, Location loc,
+                               pto::MteL1L0a3dOp op, Value source,
+                               Value destination, Type elementType,
+                               const Derived3dLoadControls &controls) {
+  CbufControlMath math{loc, rewriter};
+  Value fmatrix = packL3dFmatrix(rewriter, loc, op.getFmapW(), op.getFmapH(),
+                                 op.getPadLeft(), op.getPadRight(),
+                                 op.getPadTop(), op.getPadBottom());
+  Value rpt = packL3dRepeat(rewriter, loc, controls.repeatSourceStride,
+                            op.getRepeatTime(), op.getRepeatMode(),
+                            controls.dstStride, op.getDstMPosition());
+  rewriter.create<pto::SetL3dFmatrixOp>(loc, fmatrix);
+  rewriter.create<pto::SetPaddingOp>(loc, math.constant(0));
+  rewriter.create<pto::SetL3dRptOp>(loc, rpt);
+
+  OperationState loadState(loc, pto::LoadL1L0a3dOp::getOperationName());
+  loadState.addOperands({
+      source, destination, op.getMStart(), op.getKStart(), controls.mStep,
+      controls.kStep, op.getStrideW(), op.getStrideH(), op.getFilterW(),
+      op.getFilterH(), op.getDilationW(), op.getDilationH(),
+      op.getChannelSize()});
+  loadState.addAttribute("transpose", rewriter.getBoolAttr(op.getTranspose()));
+  loadState.addAttribute("element_type", TypeAttr::get(elementType));
+  rewriter.create(loadState);
+}
+
+struct ExpandMteL1L0a3dPattern
+    : public OpRewritePattern<pto::MteL1L0a3dOp> {
+  using OpRewritePattern<pto::MteL1L0a3dOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(pto::MteL1L0a3dOp op,
+                                PatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+    Value source = materializeBufferPointer(op.getSource(), rewriter, loc);
+    Value destination =
+        materializeBufferPointer(op.getDestination(), rewriter, loc);
+    if (!source || !destination) {
+      return rewriter.notifyMatchFailure(
+          op, "failed to materialize 3D load source or destination pointer");
+    }
+
+    Type elementType = getBufferElementType(op.getSource().getType());
+    if (!elementType) {
+      return rewriter.notifyMatchFailure(op,
+                                         "source element type is unavailable");
+    }
+    unsigned elementBits = elementType.getIntOrFloatBitWidth();
+    if (elementBits == 0 || elementBits % 8 != 0) {
+      return rewriter.notifyMatchFailure(op,
+                                         "source element width is unsupported");
+    }
+
+    int64_t fmapH, fmapW, filterH, filterW, channelSize, strideH, strideW,
+        dilationH, dilationW, padTop, padBottom, padLeft, padRight, repeatTime,
+        repeatMode;
+    bool constantGeometry =
+        fold3dGeometryControls(op, fmapH, fmapW, filterH, filterW, channelSize,
+                               strideH, strideW, dilationH, dilationW, padTop,
+                               padBottom, padLeft, padRight, repeatTime,
+                               repeatMode);
+    uint64_t c0Size = 32 / (elementBits / 8);
+
+    // Derive m_step/k_step/dst_stride/repeat_source_stride: all-constant
+    // geometry folds statically, dynamic inputs take the arith chain.
+    Derived3dLoadControls controls =
+        constantGeometry
+            ? deriveStatic3dControls(rewriter, loc, op, c0Size, fmapH, fmapW, filterH,
+                                     filterW, channelSize, strideH, strideW,
+                                     dilationH, dilationW, padTop, padBottom,
+                                     padLeft, padRight, repeatTime, repeatMode)
+            : deriveDynamic3dControls(rewriter, loc, op, c0Size);
+
+    emitL1L0a3dLoadOps(rewriter, loc, op, source, destination, elementType,
+                       controls);
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 struct ExpandLeftLoadPattern : public OpRewritePattern<pto::MteL1L0aOp> {
   using OpRewritePattern<pto::MteL1L0aOp>::OpRewritePattern;
 
@@ -1988,7 +2079,8 @@ struct VPTOExpandWrapperOpsPass : public pto::impl::VPTOExpandWrapperOpsBase<VPT
         patterns.add<
             ExpandUvldPattern, ExpandMteUbUbPattern, ExpandMteUbL1Pattern, ExpandCubeLoadPattern,
             ExpandCubeStorePattern, ExpandBiasLoadPattern, ExpandFpLoadPattern, ExpandCubeLoadFracPattern,
-            ExpandLeftLoadPattern, ExpandRightLoadPattern, ExpandLeftLoadMxPattern, ExpandRightLoadMxPattern,
+            ExpandLeftLoadPattern, ExpandMteL1L0a3dPattern,
+            ExpandRightLoadPattern, ExpandLeftLoadMxPattern, ExpandRightLoadMxPattern,
             ExpandAccStorePattern, ExpandAccStoreGmPattern, ExpandAccStoreUbPattern, ExpandRawFillL1Pattern,
             ExpandSimtLaunchPattern, ExpandAtomicConfigPattern<pto::SetAtomicAddOp>,
             ExpandAtomicConfigPattern<pto::SetAtomicMaxOp>, ExpandAtomicConfigPattern<pto::SetAtomicMinOp>,

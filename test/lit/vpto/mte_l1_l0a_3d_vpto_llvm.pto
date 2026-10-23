@@ -1,0 +1,199 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// LLVM-emission coverage for pto.mte_l1_l0a_3d: one kernel per element type
+// plus asymmetric-geometry / filter>255 / dynamic-geometry anchors. The pck0/
+// pck1 constants are independently derived from the documented bit layout
+// (16-cube-matmul.md "Control word layout"), so a field-order regression in
+// packL1L0a3dPck0/Pck1 changes these values.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto \
+// RUN:   --emit-vpto-llvm-ir %s -o - 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  // f16 baseline: fmap 8x8, filter 3x3, channel 16 -> M = 36, k_step = 144.
+  func.func @mte_l1_l0a_3d_llvm(
+      %src: !pto.ptr<f16, l1>, %dst: !pto.ptr<f16, l0a>) attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c3 = arith.constant 3 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c8, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+      : !pto.ptr<f16, l1>, !pto.ptr<f16, l0a>
+    return
+  }
+
+  func.func @mte_l1_l0a_3d_bf16(
+      %src: !pto.ptr<bf16, l1>, %dst: !pto.ptr<bf16, l0a>) attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c3 = arith.constant 3 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c8, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+      : !pto.ptr<bf16, l1>, !pto.ptr<bf16, l0a>
+    return
+  }
+
+  func.func @mte_l1_l0a_3d_f32(
+      %src: !pto.ptr<f32, l1>, %dst: !pto.ptr<f32, l0a>) attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c3 = arith.constant 3 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c8, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+      : !pto.ptr<f32, l1>, !pto.ptr<f32, l0a>
+    return
+  }
+
+  // 8-bit elements use c0Size = 32 -> k_step = ceil(144/32)*32 = 160
+  // (f16/bf16/f32 keep 144), so pck0 differs: 160 | 36<<16.
+  func.func @mte_l1_l0a_3d_s8(
+      %src: !pto.ptr<i8, l1>, %dst: !pto.ptr<i8, l0a>) attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c3 = arith.constant 3 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c8, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+      : !pto.ptr<i8, l1>, !pto.ptr<i8, l0a>
+    return
+  }
+
+  func.func @mte_l1_l0a_3d_u8(
+      %src: !pto.ptr<ui8, l1>, %dst: !pto.ptr<ui8, l0a>) attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c3 = arith.constant 3 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c8, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+      : !pto.ptr<ui8, l1>, !pto.ptr<ui8, l0a>
+    return
+  }
+
+  // Asymmetric geometry: filter 2x3, stride 2x1, dilation 2x1 -> M = 18,
+  // k_step = 96. pck0 = 96 | 18<<16; pck1 = 1 | 2<<6 | 3<<12 | 2<<20 |
+  // 1<<28 | 2<<36 | 16<<48. Swapping any H/W field pair changes pck1.
+  func.func @mte_l1_l0a_3d_asym(
+      %src: !pto.ptr<f16, l1>, %dst: !pto.ptr<f16, l0a>) attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c2 = arith.constant 2 : i64
+    %c3 = arith.constant 3 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c8, %c2, %c3, %c16, %c2, %c1, %c2, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+      : !pto.ptr<f16, l1>, !pto.ptr<f16, l0a>
+    return
+  }
+
+  // filter_w = 256 (> 255) packs its bit 8 into pck1 bit 44: with channel=1,
+  // fmap 16x256, M = 16, k_step = 256. pck0 = 256 | 16<<16; pck1 =
+  // 1 | 1<<6 | 1<<20 | 1<<28 | 1<<36 | 1<<44 | 1<<48.
+  func.func @mte_l1_l0a_3d_filter_256(
+      %src: !pto.ptr<f16, l1>, %dst: !pto.ptr<f16, l0a>) attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c16 = arith.constant 16 : i64
+    %c256 = arith.constant 256 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c16, %c256, %c1, %c256, %c1, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+      : !pto.ptr<f16, l1>, !pto.ptr<f16, l0a>
+    return
+  }
+
+  // transpose=true sets pck1 bit 46: baseline pck1 (4503668618440769) with
+  // bit 46 -> 4574037362618433; nothing else in the load word changes.
+  func.func @mte_l1_l0a_3d_transpose(
+      %src: !pto.ptr<f16, l1>, %dst: !pto.ptr<f16, l0a>) attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %c3 = arith.constant 3 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    pto.mte_l1_l0a_3d %src, %dst, %c8, %c8, %c3, %c3, %c16, %c1, %c1, %c1, %c1, %c0, %c0, %c0, %c0, %c0, %c0, %c1, %c0, %c0
+      {transpose = true}
+      : !pto.ptr<f16, l1>, !pto.ptr<f16, l0a>
+    return
+  }
+
+  // Dynamic geometry: every control is an SSA value, the expansion builds the
+  // arith chain and the emitter lowers it; the SET.*/LOAD calls must still
+  // appear with SSA controls.
+  func.func @mte_l1_l0a_3d_dynamic(
+      %src: !pto.ptr<f16, l1>, %dst: !pto.ptr<f16, l0a>,
+      %fmap_h: i64, %fmap_w: i64, %filter_h: i64, %filter_w: i64,
+      %channel: i64, %stride_h: i64, %stride_w: i64,
+      %dilation_h: i64, %dilation_w: i64,
+      %pad_top: i64, %pad_bottom: i64, %pad_left: i64, %pad_right: i64,
+      %m_start: i64, %k_start: i64, %repeat_time: i64, %repeat_mode: i64,
+      %dst_m_position: i64) attributes {pto.kernel} {
+    pto.mte_l1_l0a_3d %src, %dst, %fmap_h, %fmap_w, %filter_h, %filter_w, %channel,
+      %stride_h, %stride_w, %dilation_h, %dilation_w,
+      %pad_top, %pad_bottom, %pad_left, %pad_right,
+      %m_start, %k_start, %repeat_time, %repeat_mode, %dst_m_position
+      : !pto.ptr<f16, l1>, !pto.ptr<f16, l0a>
+    return
+  }
+}
+
+// CHECK-LABEL: define void @mte_l1_l0a_3d_llvm_mix_aic
+// CHECK: call void @llvm.hivm.SET.FMATRIX(i64 524296)
+// CHECK-NEXT: call void @llvm.hivm.SET.PADDING(i64 0)
+// CHECK-NEXT: call void @llvm.hivm.SET.L3D.RPT(i64 12884967427)
+// CHECK-NEXT: call void @llvm.hivm.LOAD.L1.TO.L0A.3DV2.c310.f16.C310.NO.DUAL({{.*}}, {{.*}}, i64 2359440, i64 4503668618440769)
+
+// CHECK-LABEL: define void @mte_l1_l0a_3d_bf16_mix_aic
+// CHECK: call void @llvm.hivm.SET.FMATRIX(i64 524296)
+// CHECK-NEXT: call void @llvm.hivm.SET.PADDING(i64 0)
+// CHECK-NEXT: call void @llvm.hivm.SET.L3D.RPT(i64 12884967427)
+// CHECK-NEXT: call void @llvm.hivm.LOAD.L1.TO.L0A.3DV2.c310.bf16.C310.NO.DUAL({{.*}}, {{.*}}, i64 2359440, i64 4503668618440769)
+
+// CHECK-LABEL: define void @mte_l1_l0a_3d_f32_mix_aic
+// CHECK: call void @llvm.hivm.SET.FMATRIX(i64 524296)
+// CHECK-NEXT: call void @llvm.hivm.SET.PADDING(i64 0)
+// CHECK-NEXT: call void @llvm.hivm.SET.L3D.RPT(i64 12884967427)
+// CHECK-NEXT: call void @llvm.hivm.LOAD.L1.TO.L0A.3DV2.c310.f32.C310.NO.DUAL({{.*}}, {{.*}}, i64 2359440, i64 4503668618440769)
+
+// CHECK-LABEL: define void @mte_l1_l0a_3d_s8_mix_aic
+// CHECK: call void @llvm.hivm.SET.FMATRIX(i64 524296)
+// CHECK-NEXT: call void @llvm.hivm.SET.PADDING(i64 0)
+// CHECK-NEXT: call void @llvm.hivm.SET.L3D.RPT(i64 12884967427)
+// CHECK-NEXT: call void @llvm.hivm.LOAD.L1.TO.L0A.3DV2.c310.s8.C310.NO.DUAL({{.*}}, {{.*}}, i64 2359456, i64 4503668618440769)
+
+// CHECK-LABEL: define void @mte_l1_l0a_3d_u8_mix_aic
+// CHECK: call void @llvm.hivm.SET.FMATRIX(i64 524296)
+// CHECK-NEXT: call void @llvm.hivm.SET.PADDING(i64 0)
+// CHECK-NEXT: call void @llvm.hivm.SET.L3D.RPT(i64 12884967427)
+// CHECK-NEXT: call void @llvm.hivm.LOAD.L1.TO.L0A.3DV2.c310.u8.C310.NO.DUAL({{.*}}, {{.*}}, i64 2359456, i64 4503668618440769)
+
+// CHECK-LABEL: define void @mte_l1_l0a_3d_asym_mix_aic
+// CHECK: call void @llvm.hivm.SET.FMATRIX(i64 524296)
+// CHECK-NEXT: call void @llvm.hivm.SET.PADDING(i64 0)
+// CHECK-NEXT: call void @llvm.hivm.SET.L3D.RPT(i64 8590000130)
+// CHECK-NEXT: call void @llvm.hivm.LOAD.L1.TO.L0A.3DV2.c310.f16.C310.NO.DUAL({{.*}}, {{.*}}, i64 1179744, i64 4503737336868993)
+
+// CHECK-LABEL: define void @mte_l1_l0a_3d_filter_256_mix_aic
+// CHECK: call void @llvm.hivm.SET.FMATRIX(i64 1048832)
+// CHECK-NEXT: call void @llvm.hivm.SET.PADDING(i64 0)
+// CHECK-NEXT: call void @llvm.hivm.SET.L3D.RPT(i64 4295032833)
+// CHECK-NEXT: call void @llvm.hivm.LOAD.L1.TO.L0A.3DV2.c310.f16.C310.NO.DUAL({{.*}}, {{.*}}, i64 1048832, i64 299136151715905)
+
+// CHECK-LABEL: define void @mte_l1_l0a_3d_transpose_mix_aic
+// CHECK: call void @llvm.hivm.SET.FMATRIX(i64 524296)
+// CHECK-NEXT: call void @llvm.hivm.SET.PADDING(i64 0)
+// CHECK-NEXT: call void @llvm.hivm.SET.L3D.RPT(i64 12884967427)
+// CHECK-NEXT: call void @llvm.hivm.LOAD.L1.TO.L0A.3DV2.c310.f16.C310.NO.DUAL({{.*}}, {{.*}}, i64 2359440, i64 4574037362618433)
+
+// CHECK-LABEL: define void @mte_l1_l0a_3d_dynamic_mix_aic
+// CHECK: call void @llvm.hivm.SET.FMATRIX(i64 %{{.*}})
+// CHECK: call void @llvm.hivm.SET.PADDING(i64 0)
+// CHECK: call void @llvm.hivm.SET.L3D.RPT(i64 %{{.*}})
+// CHECK: call void @llvm.hivm.LOAD.L1.TO.L0A.3DV2.c310.f16.C310.NO.DUAL({{.*}}, {{.*}}, i64 %{{.*}}, i64 %{{.*}})

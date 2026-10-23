@@ -663,6 +663,19 @@ struct ConvertLeftLoadOperandPattern
   }
 };
 
+struct ConvertLeftLoad3dOperandPattern
+    : public OpConversionPattern<pto::MteL1L0a3dOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(pto::MteL1L0a3dOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    return rewriteBufferLikeBoundaryOp(op, adaptor, rewriter,
+                                       "mte_l1_l0a_3d source",
+                                       "mte_l1_l0a_3d destination");
+  }
+};
+
 struct ConvertRightLoadOperandPattern
     : public OpConversionPattern<pto::MteL1L0bOp> {
   using OpConversionPattern::OpConversionPattern;
@@ -930,6 +943,7 @@ static void populateMteTransferOpLegality(ConversionTarget &target) {
   addBothOperandsPtrLegality<pto::MteL1BtOp>(&target);
   addBothOperandsPtrLegality<pto::MteGmL1FracOp>(&target);
   addBothOperandsPtrLegality<pto::MteL1L0aOp>(&target);
+  addBothOperandsPtrLegality<pto::MteL1L0a3dOp>(&target);
   addBothOperandsPtrLegality<pto::MteL1L0bOp>(&target);
   addBothOperandsPtrLegality<pto::MteL1L0aMxOp>(&target);
   addBothOperandsPtrLegality<pto::MteL1L0bMxOp>(&target);
@@ -1034,6 +1048,7 @@ static void populatePtrNormalizePatterns(RewritePatternSet &patterns,
                ConvertBiasLoadOperandPattern,
                ConvertCubeLoadFracOperandPattern,
                ConvertLeftLoadOperandPattern,
+               ConvertLeftLoad3dOperandPattern,
                ConvertRightLoadOperandPattern,
                ConvertLeftLoadMxOperandPattern,
                ConvertRightLoadMxOperandPattern,
