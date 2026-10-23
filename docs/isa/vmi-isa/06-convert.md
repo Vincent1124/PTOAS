@@ -62,7 +62,7 @@
   | `saturate` | `"SAT"`, `"NOSAT"` | required for fp-narrow / int-narrow; for fp→si / fp→ui the requirement follows the vcvt contract's `requiresSat` (e.g. `f16→si8` required, `f16→si32` **forbidden** — no overflow possible; same-width `bf16→f16` required, same-width `f16→bf16` **forbidden**); the `bf16x2→f4x2` narrow has `requiresSat=false` — any `saturate` is **forbidden**; `si32→si8` int-narrow accepts only `"NOSAT"` | For signed destinations, `SAT` clamps to `[min, max]`; for unsigned or signless destinations, it clamps to `[0, max]`. `NOSAT` performs a direct bit truncation of the result representation. |
 
 - **datatypes:** Floating-point source and destination types are
-  `{f32, f16, bf16, fp8_e4m3, fp8_e5m2}`. Integer types are
+  `{f32, f16, bf16, fp8_e4m3, fp8_e5m2, hif8}`. Integer types are
   `{si32, si16, si8, i32, i16, i8, ui32, ui16, ui8}`. The explicitly signed
   `si*` types are required when an integer is converted to floating point
   (`SiToFp`). Signless `i*` and unsigned `ui*` types cannot be used as
@@ -76,7 +76,7 @@
 
 | Direction | Source → destination | `rounding` | `saturate` |
 |---|---|---|---|
-| FpWiden | `f16→f32`, `bf16→f32`, `fp8_e4m3→f16`, `fp8_e4m3→bf16`, `fp8_e4m3→f32`, `fp8_e5m2→f16`, `fp8_e5m2→bf16`, `fp8_e5m2→f32` | forbidden | forbidden |
+| FpWiden | `f16→f32`, `bf16→f32`, `fp8_e4m3→f16`, `fp8_e4m3→bf16`, `fp8_e4m3→f32`, `fp8_e5m2→f16`, `fp8_e5m2→bf16`, `fp8_e5m2→f32`, `hif8→f16`, `hif8→bf16`, `hif8→f32` | forbidden | forbidden |
 | FpWiden (packed) | `f4E1M2x2→bf16x2`, `f4E2M1x2→bf16x2` | forbidden | forbidden |
 | FpNarrow | `f32→f16`, `f32→bf16`, `f32→fp8_e4m3`, `f32→fp8_e5m2`, `f16→fp8_e4m3`, `f16→fp8_e5m2`, `bf16→fp8_e4m3`, `bf16→fp8_e5m2` | optional: `R`/`A`/`H`/`Z` (lowering defaults to `R`; `A` for hif8 targets) | required: `SAT`/`NOSAT` |
 | FpNarrow (same width) | `bf16→f16` | optional: `R`/`A`/`H`/`Z` | required: `SAT`/`NOSAT` |
@@ -95,8 +95,9 @@
   | Conversion | Physical lowering | `#mi` | `dep` |
   |---|---|---|---|
   | SiToFp (`si32→f32`, current) | same-width `vcvt`, no part | `K` | `1` |
-  | SiToFp (`si8→f16`, current) | widen `vcvt` EVEN/ODD | `2K` | `2` |
+  | SiToFp (`si8→f16`, current) | widen `vcvt` EVEN/ODD; a 1:1 physical arity (small logical shapes, `#mi` = `K`) stays one `EVEN` per part | `K`–`2K` | `1`–`2` |
   | 16↔32 (radix-2) | `2K × vcvt EVEN/ODD` + predicate `ppack`/`punpack` companion | `2K` | `2` |
+  | FpWiden (`8-bit→f16/bf16`, radix-2) | no single A5 `vcvt`; `vmi-lower-unified-to-legacy` expands it early into `extf 8-bit→f32` + `truncf f32→f16/bf16` | `2K` | `2` |
   | 8↔32 (radix-4) | widen: `UNPK_B8` + `vintlv` + `vcvt P0` + `punpack`; narrow: `PK4_B32` store (or `vselr` gather) + `ppack` | `2–3` | `2–3` |
   | f32→fp8 quant | `1 cast` + `PK4_B32` | `K` | `1` |
   | f32→int8 quant | 3-stage cast + `PK4_B32` | `~3K` | `3` |

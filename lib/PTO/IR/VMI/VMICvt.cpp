@@ -18,6 +18,34 @@ using namespace mlir::pto;
 // Group 7: SFU verifiers
 //===----------------------------------------------------------------------===//
 
+/// A5 vcvtff only widens a 16-bit source to f32 and an 8-bit source to f32
+/// (plus the packed f4x2 -> bf16x2 pair).  An 8-bit source has no direct f16 or
+/// bf16 form: the hardware reaches it through f32, so reject the pair here
+/// instead of lowering it to a pto.vcvt that the LLVM emitter cannot legalize.
+///
+/// Note that pto.vmi.extf is not another name for pto.vmi.vcvt: the unified
+/// vcvt is the authored op and vmi-lower-unified-to-legacy expands it (the
+/// fp8 -> f16/bf16 pair becomes extf f8 -> f32 plus truncf f32 -> f16/bf16).
+/// extf is the concrete post-expansion op with a one-to-one hardware mapping, so
+/// a pair with no single instruction is out of its domain by construction.
+static bool isSupportedVMIWideningPair(Type srcElem, Type dstElem) {
+  if (pto::isPTOFloat4PackedType(srcElem) && pto::isPTOBF16x2Type(dstElem)) {
+    return true;
+  }
+  unsigned srcBits = pto::getPTOStorageElemBitWidth(srcElem);
+  unsigned dstBits = pto::getPTOStorageElemBitWidth(dstElem);
+  if (srcBits == mlir::pto::kValue16 && dstBits == mlir::pto::kValue32) {
+    return (srcElem.isF16() || srcElem.isBF16()) && dstElem.isF32();
+  }
+  if (srcBits == mlir::pto::kValue8 && dstBits == mlir::pto::kValue32) {
+    return (pto::isPTOFloat8E4M3LikeType(srcElem) ||
+            pto::isPTOFloat8E5M2LikeType(srcElem) ||
+            pto::isPTOHiFloat8Type(srcElem)) &&
+           dstElem.isF32();
+  }
+  return false;
+}
+
 LogicalResult VMIExtFOp::verify() {
   auto sourceType = cast<VMIVRegType>(getSource().getType());
   auto resultType = cast<VMIVRegType>(getResult().getType());
@@ -44,6 +72,15 @@ LogicalResult VMIExtFOp::verify() {
     return emitOpError(
         "requires result element type to be wider than source element type");
 }
+  if (!isSupportedVMIWideningPair(sourceElementType, resultElementType)) {
+    return emitOpError()
+           << "unsupported fp widening type pair on A5: " << sourceElementType
+           << " -> " << resultElementType
+           << "; A5 vcvtff only widens f16/bf16 -> f32 and float8 -> f32, so an "
+              "8-bit source reaches f16/bf16 through float8 -> f32 followed by "
+              "f32 -> f16/bf16 rather than a single conversion (the unified "
+              "pto.vmi.vcvt expands that pair for you)";
+  }
   return success();
 }
 

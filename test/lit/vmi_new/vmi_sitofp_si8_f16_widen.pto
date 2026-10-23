@@ -1,0 +1,47 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// si8 -> f16 is the radix-2 sitofp form.  The physical arity is 1:1 here (one
+// 256-byte part holds both the 256 si8 lanes and the 128 f16 lanes they widen
+// to), so the conversion is one EVEN vcvt per part after the byte unpack, the
+// same composition f16 -> f32 uses.
+// RUN: pto-test-opt %s -split-input-file -vmi-lower-unified-to-legacy -vmi-mask-granularity-assignment -vmi-layout-assignment -vmi-to-vpto | FileCheck %s
+
+module {
+  func.func @si8_to_f16_vl8(
+      %x: !pto.vmi.vreg<8xsi8, #pto.vmi.layout<contiguous>>)
+      -> !pto.vmi.vreg<8xf16, #pto.vmi.layout<contiguous>> {
+    %r = pto.vmi.vcvt %x
+        : !pto.vmi.vreg<8xsi8, #pto.vmi.layout<contiguous>>
+       -> !pto.vmi.vreg<8xf16, #pto.vmi.layout<contiguous>>
+    return %r : !pto.vmi.vreg<8xf16, #pto.vmi.layout<contiguous>>
+  }
+}
+
+// CHECK-LABEL: func.func @si8_to_f16_vl8
+// CHECK: pto.vzunpack
+// CHECK: pto.vcvt {{.*}} {part = "EVEN"}
+// CHECK: !pto.vreg<128xf16>
+
+// -----
+
+module {
+  func.func @si8_to_f16_vl128(
+      %x: !pto.vmi.vreg<128xsi8, #pto.vmi.layout<contiguous>>)
+      -> !pto.vmi.vreg<128xf16, #pto.vmi.layout<contiguous>> {
+    %r = pto.vmi.vcvt %x
+        : !pto.vmi.vreg<128xsi8, #pto.vmi.layout<contiguous>>
+       -> !pto.vmi.vreg<128xf16, #pto.vmi.layout<contiguous>>
+    return %r : !pto.vmi.vreg<128xf16, #pto.vmi.layout<contiguous>>
+  }
+}
+
+// CHECK-LABEL: func.func @si8_to_f16_vl128
+// CHECK: pto.vzunpack
+// CHECK: pto.vcvt {{.*}} {part = "EVEN"}
+// CHECK: !pto.vreg<128xf16>

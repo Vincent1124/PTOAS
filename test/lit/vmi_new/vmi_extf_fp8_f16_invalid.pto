@@ -1,0 +1,27 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// A hand-authored legacy extf cannot widen a float8 to f16/bf16: A5 vcvtff only
+// widens 16-bit sources to f32 and float8 sources to f32.  The verifier rejects
+// the pair and names the two-step form, so the failure happens at IR
+// construction instead of in the LLVM emitter.
+// RUN: not pto-test-opt %s 2>&1 | FileCheck %s
+
+module {
+  func.func @extf_f8e4m3_to_f16(
+      %x: !pto.vmi.vreg<8xf8E4M3FN, #pto.vmi.layout<contiguous>>)
+      -> !pto.vmi.vreg<8xf16, #pto.vmi.layout<contiguous>> {
+    %r = pto.vmi.extf %x
+        : !pto.vmi.vreg<8xf8E4M3FN, #pto.vmi.layout<contiguous>>
+       -> !pto.vmi.vreg<8xf16, #pto.vmi.layout<contiguous>>
+    return %r : !pto.vmi.vreg<8xf16, #pto.vmi.layout<contiguous>>
+  }
+}
+
+// CHECK: error: 'pto.vmi.extf' op unsupported fp widening type pair on A5: 'f8E4M3FN' -> 'f16'
+

@@ -644,10 +644,41 @@ private:
   LogicalResult lowerWiden(
       VMISIToFPOp op, ValueRange sourceParts, ArrayRef<VRegType> resultTypes,
       Value mask, OneToNPatternRewriter &rewriter) const {
+    // The physical arity is not the widening ratio: a 256-byte part holds both
+    // 256 si8 lanes and the 128 f16 lanes they widen to, so a small logical
+    // shape converts part-for-part.  The radix-2 relation then selects the even
+    // source lanes with one EVEN vcvt per part, exactly like f16->f32.
+    if (resultTypes.size() == sourceParts.size()) {
+      // EVEN selects the second byte of each 16-bit carrier, which is the source
+      // value only after layout assignment unpacked the bytes to lane_stride 2.
+      // Any other carrier form would convert the wrong lanes silently, so fail
+      // the match instead of emitting it.
+      VMILayoutAttr sourceLayout =
+          cast<VMIVRegType>(op.getSource().getType()).getLayoutAttr();
+      if (!sourceLayout || sourceLayout.getLaneStride() != 2) {
+        return rewriter.notifyMatchFailure(
+            op, "si8->f16 1:1 widening requires the unpacked lane_stride = 2 "
+                "source");
+      }
+      SmallVector<Value> results;
+      results.reserve(resultTypes.size());
+      for (auto [sourcePart, resultType] :
+           llvm::zip_equal(sourceParts, resultTypes)) {
+        results.push_back(
+            rewriter
+                .create<VcvtOp>(op.getLoc(), resultType, sourcePart, mask,
+                                nullptr, nullptr,
+                                rewriter.getStringAttr("EVEN"))
+                .getResult());
+      }
+      replaceOpWithFlatConvertedValues(rewriter, op, results,
+                                       *this->getTypeConverter());
+      return success();
+    }
     bool invalidArity = resultTypes.size() != 2 * sourceParts.size();
     if (invalidArity) {
       return rewriter.notifyMatchFailure(
-          op, "si8->f16 requires result arity = 2 x source arity");
+          op, "si8->f16 requires result arity = 1 x or 2 x source arity");
     }
     static constexpr StringRef kEvenOddParts[] = {"EVEN", "ODD"};
     SmallVector<Value> results;

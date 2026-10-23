@@ -1,0 +1,78 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// A5 has no single vcvt that widens a float8 to f16/bf16: vcvtff only widens
+// 16-bit sources to f32 and float8 sources to f32.  The documented radix-2 pair
+// therefore expands early, in vmi-lower-unified-to-legacy, into fp8 -> f32
+// followed by f32 -> f16/bf16; both steps are exact for every float8 value.
+// RUN: pto-test-opt %s -split-input-file -vmi-lower-unified-to-legacy | FileCheck %s
+
+module {
+  func.func @f8e4m3_to_f16(
+      %x: !pto.vmi.vreg<8xf8E4M3FN, #pto.vmi.layout<contiguous>>)
+      -> !pto.vmi.vreg<8xf16, #pto.vmi.layout<contiguous>> {
+    %r = pto.vmi.vcvt %x
+        : !pto.vmi.vreg<8xf8E4M3FN, #pto.vmi.layout<contiguous>>
+       -> !pto.vmi.vreg<8xf16, #pto.vmi.layout<contiguous>>
+    return %r : !pto.vmi.vreg<8xf16, #pto.vmi.layout<contiguous>>
+  }
+}
+
+// CHECK-LABEL: func.func @f8e4m3_to_f16
+// CHECK: pto.vmi.extf {{.*}} -> !pto.vmi.vreg<8xf32
+// CHECK: pto.vmi.truncf {{.*}} -> !pto.vmi.vreg<8xf16
+
+// -----
+
+module {
+  func.func @f8e5m2_to_bf16(
+      %x: !pto.vmi.vreg<8xf8E5M2, #pto.vmi.layout<contiguous>>)
+      -> !pto.vmi.vreg<8xbf16, #pto.vmi.layout<contiguous>> {
+    %r = pto.vmi.vcvt %x
+        : !pto.vmi.vreg<8xf8E5M2, #pto.vmi.layout<contiguous>>
+       -> !pto.vmi.vreg<8xbf16, #pto.vmi.layout<contiguous>>
+    return %r : !pto.vmi.vreg<8xbf16, #pto.vmi.layout<contiguous>>
+  }
+}
+
+// CHECK-LABEL: func.func @f8e5m2_to_bf16
+// CHECK: pto.vmi.extf {{.*}} -> !pto.vmi.vreg<8xf32
+// CHECK: pto.vmi.truncf {{.*}} -> !pto.vmi.vreg<8xbf16
+
+// -----
+
+module {
+  func.func @f8e4m3_to_f32_stays_single(
+      %x: !pto.vmi.vreg<8xf8E4M3FN, #pto.vmi.layout<contiguous>>)
+      -> !pto.vmi.vreg<8xf32, #pto.vmi.layout<contiguous>> {
+    %r = pto.vmi.vcvt %x
+        : !pto.vmi.vreg<8xf8E4M3FN, #pto.vmi.layout<contiguous>>
+       -> !pto.vmi.vreg<8xf32, #pto.vmi.layout<contiguous>>
+    return %r : !pto.vmi.vreg<8xf32, #pto.vmi.layout<contiguous>>
+  }
+}
+
+// CHECK-LABEL: func.func @f8e4m3_to_f32_stays_single
+// CHECK: pto.vmi.extf {{.*}} -> !pto.vmi.vreg<8xf32
+// CHECK-NOT: pto.vmi.truncf
+// -----
+
+module {
+  func.func @hif8_to_f16(
+      %x: !pto.vmi.vreg<8x!pto.hif8, #pto.vmi.layout<contiguous>>)
+      -> !pto.vmi.vreg<8xf16, #pto.vmi.layout<contiguous>> {
+    %r = pto.vmi.vcvt %x
+        : !pto.vmi.vreg<8x!pto.hif8, #pto.vmi.layout<contiguous>>
+       -> !pto.vmi.vreg<8xf16, #pto.vmi.layout<contiguous>>
+    return %r : !pto.vmi.vreg<8xf16, #pto.vmi.layout<contiguous>>
+  }
+}
+
+// CHECK-LABEL: func.func @hif8_to_f16
+// CHECK: pto.vmi.extf {{.*}} -> !pto.vmi.vreg<8xf32
+// CHECK: pto.vmi.truncf {{.*}} -> !pto.vmi.vreg<8xf16

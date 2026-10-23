@@ -326,7 +326,44 @@ static LogicalResult lowerVCvt(VMICvtOp op, OpBuilder &builder) {
   StringAttr saturateAttr = op.getSaturateAttr();
 
   if (direction == "widen_fp") {
-    result = builder.create<VMIExtFOp>(loc, resultType, source).getResult();
+    // A5 has no fp8 -> f16/bf16 vcvt: vcvtff only widens a 16-bit source to f32
+    // and a float8 source to f32.  The documented radix-2 pair therefore expands
+    // here, before layout assignment, into fp8 -> f32 followed by f32 -> f16/bf16.
+    // Both steps are exact for e4m3 and e5m2 into f16/bf16, so the narrow step
+    // can use the default round/saturate modes.
+    //
+    // Only the FpWiden contract's 8-bit sources expand: e4m3, e5m2 and hif8.  All
+    // three are exact through f32 into f16/bf16 (hif8 tops out at 32768 with at
+    // most five mantissa bits), so the default R/SAT modes never change a result.
+    // f8E8M0 is not part of that contract, so it stays a single extf and the
+    // verifier rejects it with its own diagnostic instead of expanding into IR it
+    // then refuses.
+    unsigned srcBits = pto::getPTOStorageElemBitWidth(srcElem);
+    unsigned dstBits = pto::getPTOStorageElemBitWidth(dstElem);
+    bool isWidenableFloat8 = pto::isPTOFloat8E4M3LikeType(srcElem) ||
+                             pto::isPTOFloat8E5M2LikeType(srcElem) ||
+                             pto::isPTOHiFloat8Type(srcElem);
+    if (srcBits == mlir::pto::kValue8 && dstBits == mlir::pto::kValue16 &&
+        isWidenableFloat8) {
+      // Take the layout from the result, not the source: the source may declare a
+      // lane-strided carrier form that the f32 extf has no layout contract for.
+      // Layout assignment then materializes whatever the f32 -> f16/bf16 truncf
+      // needs (a deinterleaved = 2 intermediate cannot be created here, the VMI
+      // producer boundary rejects non-surface layouts).
+      auto resultVRegType = cast<VMIVRegType>(resultType);
+      auto wideType = VMIVRegType::get(
+          builder.getContext(), resultVRegType.getElementCount(),
+          builder.getF32Type(), resultVRegType.getLayout());
+      Value wide = builder.create<VMIExtFOp>(loc, wideType, source).getResult();
+      result =
+          builder
+              .create<VMITruncFOp>(loc, resultType, wide,
+                                   builder.getStringAttr("R"),
+                                   builder.getStringAttr("SAT"))
+              .getResult();
+    } else {
+      result = builder.create<VMIExtFOp>(loc, resultType, source).getResult();
+    }
   } else if (direction == "narrow_fp") {
     StringAttr roundingAttr = op.getRoundingAttr();
     result = builder
