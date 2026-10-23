@@ -1,0 +1,570 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a3 --pto-level=level3 --enable-insert-sync --emit-pto-ir %s | FileCheck %s
+// RUN: ptoas --pto-arch=a5 --pto-level=level3 --enable-insert-sync --emit-pto-ir %s | FileCheck %s
+
+// Each iteration of the first three loops writes a distinct complete UB row.
+// Removing their V <-> MTE2 backedges must preserve initialization and the
+// final whole-parent store. Zero and one iterations exercise event boundaries.
+// Constant, unknown, and modulo row offsets can reuse storage and retain sync.
+// The per-row reader retains same-iteration RAW dependencies, without serializing
+// the next distinct row. Moving parents, nested reuse, and whole-parent readers
+// retain the dependencies that their aliasing requires.
+!parent = !pto.tile_buf<vec, 64x512xbf16>
+!row = !pto.tile_buf<vec, 1x512xbf16>
+!src = !pto.partition_tensor_view<1x512xbf16>
+!out = !pto.partition_tensor_view<64x512xbf16>
+
+module {
+  func.func @issue1587_disjoint_rows_64(%src: !src, %out: !out) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c64 = arith.constant 64 : index
+    %a0 = arith.constant 0 : i64
+    %a65536 = arith.constant 65536 : i64
+    %zero = arith.constant 0.0 : bf16
+    %parent = pto.alloc_tile addr = %a0 : !parent
+    %zero_row = pto.alloc_tile addr = %a65536 : !row
+    pto.texpands ins(%zero : bf16) outs(%parent : !parent)
+    pto.texpands ins(%zero : bf16) outs(%zero_row : !row)
+    scf.for %r = %c0 to %c64 step %c1 {
+      %target = pto.subview %parent[%r, %c0] sizes [1, 512] : !parent -> !row
+      %parity = arith.remui %r, %c2 : index
+      %take_dma = arith.cmpi eq, %parity, %c0 : index
+      scf.if %take_dma {
+        pto.tload ins(%src : !src) outs(%target : !row)
+      } else {
+        pto.tmov ins(%zero_row : !row) outs(%target : !row)
+      }
+    }
+    pto.tstore ins(%parent : !parent) outs(%out : !out)
+    return
+  }
+
+  func.func @issue1587_disjoint_rows_1(%src: !src, %out: !out) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c64 = arith.constant 64 : index
+    %a0 = arith.constant 0 : i64
+    %a65536 = arith.constant 65536 : i64
+    %zero = arith.constant 0.0 : bf16
+    %parent = pto.alloc_tile addr = %a0 : !parent
+    %zero_row = pto.alloc_tile addr = %a65536 : !row
+    pto.texpands ins(%zero : bf16) outs(%parent : !parent)
+    pto.texpands ins(%zero : bf16) outs(%zero_row : !row)
+    scf.for %r = %c0 to %c1 step %c1 {
+      %target = pto.subview %parent[%r, %c0] sizes [1, 512] : !parent -> !row
+      %parity = arith.remui %r, %c2 : index
+      %take_dma = arith.cmpi eq, %parity, %c0 : index
+      scf.if %take_dma {
+        pto.tload ins(%src : !src) outs(%target : !row)
+      } else {
+        pto.tmov ins(%zero_row : !row) outs(%target : !row)
+      }
+    }
+    pto.tstore ins(%parent : !parent) outs(%out : !out)
+    return
+  }
+
+  func.func @issue1587_disjoint_rows_0(%src: !src, %out: !out) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c64 = arith.constant 64 : index
+    %a0 = arith.constant 0 : i64
+    %a65536 = arith.constant 65536 : i64
+    %zero = arith.constant 0.0 : bf16
+    %parent = pto.alloc_tile addr = %a0 : !parent
+    %zero_row = pto.alloc_tile addr = %a65536 : !row
+    pto.texpands ins(%zero : bf16) outs(%parent : !parent)
+    pto.texpands ins(%zero : bf16) outs(%zero_row : !row)
+    scf.for %r = %c0 to %c0 step %c1 {
+      %target = pto.subview %parent[%r, %c0] sizes [1, 512] : !parent -> !row
+      %parity = arith.remui %r, %c2 : index
+      %take_dma = arith.cmpi eq, %parity, %c0 : index
+      scf.if %take_dma {
+        pto.tload ins(%src : !src) outs(%target : !row)
+      } else {
+        pto.tmov ins(%zero_row : !row) outs(%target : !row)
+      }
+    }
+    pto.tstore ins(%parent : !parent) outs(%out : !out)
+    return
+  }
+
+  func.func @issue1587_same_row_loop(%src: !src, %out: !out) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c64 = arith.constant 64 : index
+    %a0 = arith.constant 0 : i64
+    %a65536 = arith.constant 65536 : i64
+    %zero = arith.constant 0.0 : bf16
+    %parent = pto.alloc_tile addr = %a0 : !parent
+    %zero_row = pto.alloc_tile addr = %a65536 : !row
+    pto.texpands ins(%zero : bf16) outs(%parent : !parent)
+    pto.texpands ins(%zero : bf16) outs(%zero_row : !row)
+    scf.for %r = %c0 to %c64 step %c1 {
+      %target = pto.subview %parent[%c0, %c0] sizes [1, 512] : !parent -> !row
+      %parity = arith.remui %r, %c2 : index
+      %take_dma = arith.cmpi eq, %parity, %c0 : index
+      scf.if %take_dma {
+        pto.tload ins(%src : !src) outs(%target : !row)
+      } else {
+        pto.tmov ins(%zero_row : !row) outs(%target : !row)
+      }
+    }
+    pto.tstore ins(%parent : !parent) outs(%out : !out)
+    return
+  }
+
+  func.func @issue1587_unknown_row_loop(%unknown: index, %src: !src, %out: !out) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c64 = arith.constant 64 : index
+    %a0 = arith.constant 0 : i64
+    %a65536 = arith.constant 65536 : i64
+    %zero = arith.constant 0.0 : bf16
+    %parent = pto.alloc_tile addr = %a0 : !parent
+    %zero_row = pto.alloc_tile addr = %a65536 : !row
+    pto.texpands ins(%zero : bf16) outs(%parent : !parent)
+    pto.texpands ins(%zero : bf16) outs(%zero_row : !row)
+    scf.for %r = %c0 to %c64 step %c1 {
+      %target = pto.subview %parent[%unknown, %c0] sizes [1, 512] : !parent -> !row
+      %parity = arith.remui %r, %c2 : index
+      %take_dma = arith.cmpi eq, %parity, %c0 : index
+      scf.if %take_dma {
+        pto.tload ins(%src : !src) outs(%target : !row)
+      } else {
+        pto.tmov ins(%zero_row : !row) outs(%target : !row)
+      }
+    }
+    pto.tstore ins(%parent : !parent) outs(%out : !out)
+    return
+  }
+
+  func.func @issue1587_rotating_row_loop(%src: !src, %out: !out) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c64 = arith.constant 64 : index
+    %a0 = arith.constant 0 : i64
+    %a65536 = arith.constant 65536 : i64
+    %zero = arith.constant 0.0 : bf16
+    %parent = pto.alloc_tile addr = %a0 : !parent
+    %zero_row = pto.alloc_tile addr = %a65536 : !row
+    pto.texpands ins(%zero : bf16) outs(%parent : !parent)
+    pto.texpands ins(%zero : bf16) outs(%zero_row : !row)
+    scf.for %r = %c0 to %c64 step %c1 {
+      %slot = arith.remui %r, %c2 : index
+      %target = pto.subview %parent[%slot, %c0] sizes [1, 512] : !parent -> !row
+      %parity = arith.remui %r, %c2 : index
+      %take_dma = arith.cmpi eq, %parity, %c0 : index
+      scf.if %take_dma {
+        pto.tload ins(%src : !src) outs(%target : !row)
+      } else {
+        pto.tmov ins(%zero_row : !row) outs(%target : !row)
+      }
+    }
+    pto.tstore ins(%parent : !parent) outs(%out : !out)
+    return
+  }
+
+  func.func @issue1587_disjoint_rows_reader(%src: !src, %out: !out, %row_out: !src) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c64 = arith.constant 64 : index
+    %a0 = arith.constant 0 : i64
+    %a65536 = arith.constant 65536 : i64
+    %zero = arith.constant 0.0 : bf16
+    %parent = pto.alloc_tile addr = %a0 : !parent
+    %zero_row = pto.alloc_tile addr = %a65536 : !row
+    pto.texpands ins(%zero : bf16) outs(%parent : !parent)
+    pto.texpands ins(%zero : bf16) outs(%zero_row : !row)
+    scf.for %r = %c0 to %c64 step %c1 {
+      %target = pto.subview %parent[%r, %c0] sizes [1, 512] : !parent -> !row
+      %parity = arith.remui %r, %c2 : index
+      %take_dma = arith.cmpi eq, %parity, %c0 : index
+      scf.if %take_dma {
+        pto.tload ins(%src : !src) outs(%target : !row)
+      } else {
+        pto.tmov ins(%zero_row : !row) outs(%target : !row)
+      }
+      pto.tstore ins(%target : !row) outs(%row_out : !src)
+    }
+    pto.tstore ins(%parent : !parent) outs(%out : !out)
+    return
+  }
+
+  // The changing allocation cancels the subview offset: every iteration uses
+  // address zero. An IV-shaped subview alone does not prove disjoint storage.
+  func.func @issue1587_moving_parent_loop(%src: !src, %out: !out) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c64 = arith.constant 64 : index
+    %a0 = arith.constant 0 : i64
+    %a1024 = arith.constant 1024 : i64
+    %a65536 = arith.constant 65536 : i64
+    %zero = arith.constant 0.0 : bf16
+    %parent = pto.alloc_tile addr = %a0 : !parent
+    %zero_row = pto.alloc_tile addr = %a65536 : !row
+    pto.texpands ins(%zero : bf16) outs(%parent : !parent)
+    pto.texpands ins(%zero : bf16) outs(%zero_row : !row)
+    scf.for %r = %c0 to %c64 step %c1 {
+      %r64 = arith.index_cast %r : index to i64
+      %bytes = arith.muli %r64, %a1024 : i64
+      %base = arith.subi %a0, %bytes : i64
+      %moving_parent = pto.alloc_tile addr = %base : !parent
+      %target = pto.subview %moving_parent[%r, %c0] sizes [1, 512] : !parent -> !row
+      %parity = arith.remui %r, %c2 : index
+      %take_dma = arith.cmpi eq, %parity, %c0 : index
+      scf.if %take_dma {
+        pto.tload ins(%src : !src) outs(%target : !row)
+      } else {
+        pto.tmov ins(%zero_row : !row) outs(%target : !row)
+      }
+    }
+    pto.tstore ins(%parent : !parent) outs(%out : !out)
+    return
+  }
+
+  // The outer row is invariant in the inner loop, which overwrites it twice.
+  func.func @issue1587_nested_row_loop(%src: !src, %out: !out) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c64 = arith.constant 64 : index
+    %a0 = arith.constant 0 : i64
+    %a65536 = arith.constant 65536 : i64
+    %zero = arith.constant 0.0 : bf16
+    %parent = pto.alloc_tile addr = %a0 : !parent
+    %zero_row = pto.alloc_tile addr = %a65536 : !row
+    pto.texpands ins(%zero : bf16) outs(%parent : !parent)
+    pto.texpands ins(%zero : bf16) outs(%zero_row : !row)
+    scf.for %r = %c0 to %c64 step %c1 {
+      %target = pto.subview %parent[%r, %c0] sizes [1, 512] : !parent -> !row
+      scf.for %repeat = %c0 to %c2 step %c1 {
+        %take_dma = arith.cmpi eq, %repeat, %c0 : index
+        scf.if %take_dma {
+          pto.tload ins(%src : !src) outs(%target : !row)
+        } else {
+          pto.tmov ins(%zero_row : !row) outs(%target : !row)
+        }
+      }
+    }
+    pto.tstore ins(%parent : !parent) outs(%out : !out)
+    return
+  }
+
+  // Reading the whole parent observes rows written by every iteration.
+  func.func @issue1587_whole_parent_reader(%src: !src, %out: !out) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c64 = arith.constant 64 : index
+    %a0 = arith.constant 0 : i64
+    %a65536 = arith.constant 65536 : i64
+    %zero = arith.constant 0.0 : bf16
+    %parent = pto.alloc_tile addr = %a0 : !parent
+    %zero_row = pto.alloc_tile addr = %a65536 : !row
+    pto.texpands ins(%zero : bf16) outs(%parent : !parent)
+    pto.texpands ins(%zero : bf16) outs(%zero_row : !row)
+    scf.for %r = %c0 to %c64 step %c1 {
+      %target = pto.subview %parent[%r, %c0] sizes [1, 512] : !parent -> !row
+      %parity = arith.remui %r, %c2 : index
+      %take_dma = arith.cmpi eq, %parity, %c0 : index
+      scf.if %take_dma {
+        pto.tload ins(%src : !src) outs(%target : !row)
+      } else {
+        pto.tmov ins(%zero_row : !row) outs(%target : !row)
+      }
+      pto.tstore ins(%parent : !parent) outs(%out : !out)
+    }
+    return
+  }
+  // Bitcasts and reshapes preserve the complete byte extent of each row.
+  func.func @issue1587_disjoint_rows_aliases(%src: !src, %out: !out) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c64 = arith.constant 64 : index
+    %a0 = arith.constant 0 : i64
+    %a65536 = arith.constant 65536 : i64
+    %zero = arith.constant 0.0 : bf16
+    %parent = pto.alloc_tile addr = %a0 : !parent
+    %zero_row = pto.alloc_tile addr = %a65536 : !row
+    %zero_bits = pto.bitcast %zero_row : !row -> !pto.tile_buf<vec, 1x512xi16>
+    %zero_alias = pto.treshape %zero_bits : !pto.tile_buf<vec, 1x512xi16> -> !pto.tile_buf<vec, 2x256xi16>
+    pto.texpands ins(%zero : bf16) outs(%parent : !parent)
+    pto.texpands ins(%zero : bf16) outs(%zero_row : !row)
+    scf.for %r = %c0 to %c64 step %c1 {
+      %target = pto.subview %parent[%r, %c0] sizes [1, 512] : !parent -> !row
+      %target_bits = pto.bitcast %target : !row -> !pto.tile_buf<vec, 1x512xi16>
+      %target_alias = pto.treshape %target_bits : !pto.tile_buf<vec, 1x512xi16> -> !pto.tile_buf<vec, 2x256xi16>
+      %parity = arith.remui %r, %c2 : index
+      %take_dma = arith.cmpi eq, %parity, %c0 : index
+      scf.if %take_dma {
+        pto.tload ins(%src : !src) outs(%target : !row)
+      } else {
+        pto.tmov ins(%zero_alias : !pto.tile_buf<vec, 2x256xi16>) outs(%target_alias : !pto.tile_buf<vec, 2x256xi16>)
+      }
+    }
+    pto.tstore ins(%parent : !parent) outs(%out : !out)
+    return
+  }
+  // Inner iterations are disjoint, but the outer loop repeats the entire pass.
+  func.func @issue1587_repeated_row_scan(%src: !src, %out: !out) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c64 = arith.constant 64 : index
+    %a0 = arith.constant 0 : i64
+    %a65536 = arith.constant 65536 : i64
+    %zero = arith.constant 0.0 : bf16
+    %parent = pto.alloc_tile addr = %a0 : !parent
+    %zero_row = pto.alloc_tile addr = %a65536 : !row
+    pto.texpands ins(%zero : bf16) outs(%parent : !parent)
+    pto.texpands ins(%zero : bf16) outs(%zero_row : !row)
+    scf.for %repeat = %c0 to %c2 step %c1 {
+      scf.for %r = %c0 to %c64 step %c1 {
+        %target = pto.subview %parent[%r, %c0] sizes [1, 512] : !parent -> !row
+        %take_dma = arith.cmpi eq, %repeat, %c0 : index
+        scf.if %take_dma {
+          pto.tload ins(%src : !src) outs(%target : !row)
+        } else {
+          pto.tmov ins(%zero_row : !row) outs(%target : !row)
+        }
+      }
+    }
+    pto.tstore ins(%parent : !parent) outs(%out : !out)
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @issue1587_disjoint_rows_64(
+// CHECK: pto.texpands
+// CHECK-NEXT: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <[[DISJOINT_ROWS_64_INIT:EVENT_ID[0-9]+]]>]
+// CHECK: pto.texpands
+// CHECK-NEXT: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <[[DISJOINT_ROWS_64_INIT]]>]
+// CHECK-NEXT: scf.for
+// CHECK-NOT: pto.{{(set|wait)}}_flag
+// CHECK: scf.if
+// CHECK-NEXT: pto.tload
+// CHECK-NEXT: } else {
+// CHECK: pto.tmov
+// CHECK-NEXT: }
+// CHECK-NOT: pto.{{(set|wait)}}_flag
+// CHECK: pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <[[DISJOINT_ROWS_64_V_STORE:EVENT_ID[0-9]+]]>]
+// CHECK-NEXT: pto.set_flag[<PIPE_MTE2>, <PIPE_MTE3>, <[[DISJOINT_ROWS_64_DMA_STORE:EVENT_ID[0-9]+]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE2>, <PIPE_MTE3>, <[[DISJOINT_ROWS_64_DMA_STORE]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <[[DISJOINT_ROWS_64_V_STORE]]>]
+// CHECK-NEXT: pto.tstore
+// CHECK-NOT: pto.{{(set|wait)}}_flag
+// CHECK: return
+
+// CHECK-LABEL: func.func @issue1587_disjoint_rows_1(
+// CHECK: pto.texpands
+// CHECK-NEXT: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <[[DISJOINT_ROWS_1_INIT:EVENT_ID[0-9]+]]>]
+// CHECK: pto.texpands
+// CHECK-NEXT: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <[[DISJOINT_ROWS_1_INIT]]>]
+// CHECK-NEXT: scf.for
+// CHECK-NOT: pto.{{(set|wait)}}_flag
+// CHECK: scf.if
+// CHECK-NEXT: pto.tload
+// CHECK-NEXT: } else {
+// CHECK: pto.tmov
+// CHECK-NEXT: }
+// CHECK-NOT: pto.{{(set|wait)}}_flag
+// CHECK: pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <[[DISJOINT_ROWS_1_V_STORE:EVENT_ID[0-9]+]]>]
+// CHECK-NEXT: pto.set_flag[<PIPE_MTE2>, <PIPE_MTE3>, <[[DISJOINT_ROWS_1_DMA_STORE:EVENT_ID[0-9]+]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE2>, <PIPE_MTE3>, <[[DISJOINT_ROWS_1_DMA_STORE]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <[[DISJOINT_ROWS_1_V_STORE]]>]
+// CHECK-NEXT: pto.tstore
+// CHECK-NOT: pto.{{(set|wait)}}_flag
+// CHECK: return
+
+// CHECK-LABEL: func.func @issue1587_disjoint_rows_0(
+// CHECK: pto.texpands
+// CHECK-NEXT: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <[[DISJOINT_ROWS_0_INIT:EVENT_ID[0-9]+]]>]
+// CHECK: pto.texpands
+// CHECK-NEXT: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <[[DISJOINT_ROWS_0_INIT]]>]
+// CHECK-NEXT: scf.for
+// CHECK-NOT: pto.{{(set|wait)}}_flag
+// CHECK: scf.if
+// CHECK-NEXT: pto.tload
+// CHECK-NEXT: } else {
+// CHECK: pto.tmov
+// CHECK-NEXT: }
+// CHECK-NOT: pto.{{(set|wait)}}_flag
+// CHECK: pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <[[DISJOINT_ROWS_0_V_STORE:EVENT_ID[0-9]+]]>]
+// CHECK-NEXT: pto.set_flag[<PIPE_MTE2>, <PIPE_MTE3>, <[[DISJOINT_ROWS_0_DMA_STORE:EVENT_ID[0-9]+]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE2>, <PIPE_MTE3>, <[[DISJOINT_ROWS_0_DMA_STORE]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <[[DISJOINT_ROWS_0_V_STORE]]>]
+// CHECK-NEXT: pto.tstore
+// CHECK-NOT: pto.{{(set|wait)}}_flag
+// CHECK: return
+
+// CHECK-LABEL: func.func @issue1587_same_row_loop(
+// CHECK: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <[[SAME_ROW_LOOP_V_REUSE:EVENT_ID[0-9]+]]>]
+// CHECK-NEXT: pto.set_flag[<PIPE_MTE2>, <PIPE_V>, <[[SAME_ROW_LOOP_DMA_REUSE:EVENT_ID[0-9]+]]>]
+// CHECK: scf.for
+// CHECK: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <[[SAME_ROW_LOOP_V_REUSE]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <[[SAME_ROW_LOOP_DMA_REUSE]]>]
+// CHECK-NEXT: scf.if
+// CHECK-NEXT: pto.tload
+// CHECK: pto.tmov
+// CHECK: pto.set_flag[<PIPE_MTE2>, <PIPE_V>, <[[SAME_ROW_LOOP_DMA_REUSE]]>]
+// CHECK-NEXT: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <[[SAME_ROW_LOOP_V_REUSE]]>]
+// CHECK-NEXT: }
+// CHECK: pto.tstore
+// CHECK-NEXT: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <[[SAME_ROW_LOOP_V_REUSE]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <[[SAME_ROW_LOOP_DMA_REUSE]]>]
+// CHECK: return
+
+// CHECK-LABEL: func.func @issue1587_unknown_row_loop(
+// CHECK: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <[[UNKNOWN_ROW_LOOP_V_REUSE:EVENT_ID[0-9]+]]>]
+// CHECK-NEXT: pto.set_flag[<PIPE_MTE2>, <PIPE_V>, <[[UNKNOWN_ROW_LOOP_DMA_REUSE:EVENT_ID[0-9]+]]>]
+// CHECK: scf.for
+// CHECK: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <[[UNKNOWN_ROW_LOOP_V_REUSE]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <[[UNKNOWN_ROW_LOOP_DMA_REUSE]]>]
+// CHECK-NEXT: scf.if
+// CHECK-NEXT: pto.tload
+// CHECK: pto.tmov
+// CHECK: pto.set_flag[<PIPE_MTE2>, <PIPE_V>, <[[UNKNOWN_ROW_LOOP_DMA_REUSE]]>]
+// CHECK-NEXT: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <[[UNKNOWN_ROW_LOOP_V_REUSE]]>]
+// CHECK-NEXT: }
+// CHECK: pto.tstore
+// CHECK-NEXT: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <[[UNKNOWN_ROW_LOOP_V_REUSE]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <[[UNKNOWN_ROW_LOOP_DMA_REUSE]]>]
+// CHECK: return
+
+// CHECK-LABEL: func.func @issue1587_rotating_row_loop(
+// CHECK: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <[[ROTATING_ROW_LOOP_V_REUSE:EVENT_ID[0-9]+]]>]
+// CHECK-NEXT: pto.set_flag[<PIPE_MTE2>, <PIPE_V>, <[[ROTATING_ROW_LOOP_DMA_REUSE:EVENT_ID[0-9]+]]>]
+// CHECK: scf.for
+// CHECK: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <[[ROTATING_ROW_LOOP_V_REUSE]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <[[ROTATING_ROW_LOOP_DMA_REUSE]]>]
+// CHECK-NEXT: scf.if
+// CHECK-NEXT: pto.tload
+// CHECK: pto.tmov
+// CHECK: pto.set_flag[<PIPE_MTE2>, <PIPE_V>, <[[ROTATING_ROW_LOOP_DMA_REUSE]]>]
+// CHECK-NEXT: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <[[ROTATING_ROW_LOOP_V_REUSE]]>]
+// CHECK-NEXT: }
+// CHECK: pto.tstore
+// CHECK-NEXT: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <[[ROTATING_ROW_LOOP_V_REUSE]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <[[ROTATING_ROW_LOOP_DMA_REUSE]]>]
+// CHECK: return
+
+// CHECK-LABEL: func.func @issue1587_disjoint_rows_reader(
+// CHECK: scf.for
+// CHECK-NOT: pto.{{(set|wait)}}_flag[<PIPE_MTE3>, <PIPE_{{V|MTE2}}>
+// CHECK-NOT: pto.{{(set|wait)}}_flag[<PIPE_{{V|MTE2}}>, <PIPE_{{MTE2|V}}>
+// CHECK: scf.if
+// CHECK-NEXT: pto.tload
+// CHECK: pto.tmov
+// CHECK: pto.set_flag[<PIPE_MTE2>, <PIPE_MTE3>, <[[READER_DMA_RAW:EVENT_ID[0-9]+]]>]
+// CHECK-NEXT: pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <[[READER_V_RAW:EVENT_ID[0-9]+]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE2>, <PIPE_MTE3>, <[[READER_DMA_RAW]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <[[READER_V_RAW]]>]
+// CHECK: pto.tstore
+// CHECK-NOT: pto.{{(set|wait)}}_flag
+// CHECK: return
+
+// CHECK-LABEL: func.func @issue1587_moving_parent_loop(
+// CHECK: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <[[MOVING_V_REUSE:EVENT_ID[0-9]+]]>]
+// CHECK-NEXT: pto.set_flag[<PIPE_MTE2>, <PIPE_V>, <[[MOVING_DMA_REUSE:EVENT_ID[0-9]+]]>]
+// CHECK: scf.for
+// CHECK: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <[[MOVING_V_REUSE]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <[[MOVING_DMA_REUSE]]>]
+// CHECK-NEXT: scf.if
+// CHECK-NEXT: pto.tload
+// CHECK: pto.tmov
+// CHECK: pto.set_flag[<PIPE_MTE2>, <PIPE_V>, <[[MOVING_DMA_REUSE]]>]
+// CHECK-NEXT: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <[[MOVING_V_REUSE]]>]
+// CHECK-NEXT: }
+// CHECK: pto.tstore
+// CHECK-NEXT: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <[[MOVING_V_REUSE]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <[[MOVING_DMA_REUSE]]>]
+// CHECK: return
+
+// CHECK-LABEL: func.func @issue1587_nested_row_loop(
+// CHECK: scf.for
+// CHECK: scf.for
+// CHECK: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <[[NESTED_V_REUSE:EVENT_ID[0-9]+]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <[[NESTED_DMA_REUSE:EVENT_ID[0-9]+]]>]
+// CHECK-NEXT: scf.if
+// CHECK-NEXT: pto.tload
+// CHECK: pto.tmov
+// CHECK: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <[[NESTED_V_REUSE]]>]
+// CHECK-NEXT: pto.set_flag[<PIPE_MTE2>, <PIPE_V>, <[[NESTED_DMA_REUSE]]>]
+// CHECK-NEXT: }
+// CHECK-NEXT: }
+// CHECK: pto.tstore
+// CHECK: return
+
+// CHECK-LABEL: func.func @issue1587_whole_parent_reader(
+// CHECK: pto.set_flag[<PIPE_MTE3>, <PIPE_MTE2>, <[[WHOLE_DMA_REUSE:EVENT_ID[0-9]+]]>]
+// CHECK-NEXT: pto.set_flag[<PIPE_MTE3>, <PIPE_V>, <[[WHOLE_V_REUSE:EVENT_ID[0-9]+]]>]
+// CHECK: scf.for
+// CHECK: pto.wait_flag[<PIPE_MTE3>, <PIPE_MTE2>, <[[WHOLE_DMA_REUSE]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE3>, <PIPE_V>, <[[WHOLE_V_REUSE]]>]
+// CHECK-NEXT: scf.if
+// CHECK-NEXT: pto.tload
+// CHECK: pto.tmov
+// CHECK: pto.tstore
+// CHECK-NEXT: pto.set_flag[<PIPE_MTE3>, <PIPE_V>, <[[WHOLE_V_REUSE]]>]
+// CHECK-NEXT: pto.set_flag[<PIPE_MTE3>, <PIPE_MTE2>, <[[WHOLE_DMA_REUSE]]>]
+// CHECK-NEXT: }
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE3>, <PIPE_MTE2>, <[[WHOLE_DMA_REUSE]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE3>, <PIPE_V>, <[[WHOLE_V_REUSE]]>]
+// CHECK: return
+
+// CHECK-LABEL: func.func @issue1587_disjoint_rows_aliases(
+// CHECK: pto.texpands
+// CHECK-NEXT: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <[[ALIASES_INIT:EVENT_ID[0-9]+]]>]
+// CHECK: pto.texpands
+// CHECK-NEXT: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <[[ALIASES_INIT]]>]
+// CHECK-NEXT: scf.for
+// CHECK-NOT: pto.{{(set|wait)}}_flag
+// CHECK: scf.if
+// CHECK-NEXT: pto.tload
+// CHECK-NEXT: } else {
+// CHECK: pto.tmov
+// CHECK-NEXT: }
+// CHECK-NOT: pto.{{(set|wait)}}_flag
+// CHECK: pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <[[ALIASES_V_STORE:EVENT_ID[0-9]+]]>]
+// CHECK-NEXT: pto.set_flag[<PIPE_MTE2>, <PIPE_MTE3>, <[[ALIASES_DMA_STORE:EVENT_ID[0-9]+]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE2>, <PIPE_MTE3>, <[[ALIASES_DMA_STORE]]>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <[[ALIASES_V_STORE]]>]
+// CHECK-NEXT: pto.tstore
+// CHECK-NOT: pto.{{(set|wait)}}_flag
+// CHECK: return
+
+// The reuse dependency belongs to the repeated outer scan. Its placement may
+// move to the outer boundary when the inner disjoint-row backedge is removed.
+// CHECK-LABEL: func.func @issue1587_repeated_row_scan(
+// CHECK-DAG: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <[[SCAN_V_REUSE:EVENT_ID[0-9]+]]>]
+// CHECK-DAG: pto.set_flag[<PIPE_MTE2>, <PIPE_V>, <[[SCAN_DMA_REUSE:EVENT_ID[0-9]+]]>]
+// CHECK: scf.for
+// CHECK-DAG: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <[[SCAN_V_REUSE]]>]
+// CHECK-DAG: pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <[[SCAN_DMA_REUSE]]>]
+// CHECK: scf.if
+// CHECK-NEXT: pto.tload
+// CHECK: pto.tmov
+// CHECK-DAG: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <[[SCAN_V_REUSE]]>]
+// CHECK-DAG: pto.set_flag[<PIPE_MTE2>, <PIPE_V>, <[[SCAN_DMA_REUSE]]>]
+// CHECK: pto.tstore
+// CHECK-DAG: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <[[SCAN_V_REUSE]]>]
+// CHECK-DAG: pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <[[SCAN_DMA_REUSE]]>]
+// CHECK: return

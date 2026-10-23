@@ -6,14 +6,16 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// Same-iteration disjointness for dense full-row tile subviews. Keep this
-// separate from general memory aliasing: different rows in this iteration may
-// reuse the same storage in a later iteration. All unsupported forms fail closed.
+// Disjointness for dense full-row tile subviews. Keep this separate from
+// general memory aliasing: rotating rows can reuse storage in later iterations.
+// Cross-iteration pruning requires its own non-reuse proof. Unsupported forms
+// fail closed.
 
 #include "PTO/Transforms/SlotAffineAnalysis.h"
 #include "PTO/IR/PTO.h"
 #include "PTO/IR/PTOTypeUtils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Matchers.h"
 #include <limits>
 #include <optional>
@@ -219,40 +221,53 @@ static SubViewOp findRowSubview(Value value) {
   return {};
 }
 
-struct RowSlotAccess {
-  Value allocation;
-  uint64_t count;
-  RowSlotForm slot;
+struct DenseRowAccess {
+    Value allocation;
+    uint64_t count;
+    Value row;
 };
 
-static std::optional<RowSlotAccess> getRowSlotAccess(Value value) {
-  auto view = findRowSubview(value);
-  bool denseView = view && view.getSource().getDefiningOp<AllocTileOp>() &&
-                   getDenseTileBytes(view.getSource().getType()) &&
-                   getDenseTileBytes(view.getType()) &&
-                   view.getOffsets().size() == kTileRank &&
-                   view.getSizes().size() == kTileRank;
-  if (!denseView) {
-    return std::nullopt;
-  }
-  auto parent = cast<TileBufType>(view.getSource().getType());
-  auto result = cast<TileBufType>(view.getType());
-  int64_t rows = parent.getShape()[0];
-  int64_t cols = parent.getShape()[1];
-  bool fullRow = rows >= 2 && rows <= std::numeric_limits<uint32_t>::max() &&
-                 getNonnegativeConstant(view.getOffsets()[1]) == 0 &&
-                 cast<IntegerAttr>(view.getSizes()[0]).getInt() == 1 &&
-                 cast<IntegerAttr>(view.getSizes()[1]).getInt() == cols &&
-                 result.getShape()[0] == 1 && result.getShape()[1] == cols &&
-                 result.getElementType() == parent.getElementType();
-  if (!fullRow) {
-    return std::nullopt;
-  }
-  auto slot = getRowSlotForm(view.getOffsets()[0], static_cast<uint64_t>(rows));
-  if (!slot) {
-    return std::nullopt;
-  }
-  return RowSlotAccess{view.getSource(), static_cast<uint64_t>(rows), *slot};
+static std::optional<DenseRowAccess> getDenseRowAccess(Value value)
+{
+    auto view = findRowSubview(value);
+    bool denseView = view && view.getSource().getDefiningOp<AllocTileOp>() &&
+                     getDenseTileBytes(view.getSource().getType()) && getDenseTileBytes(view.getType()) &&
+                     view.getOffsets().size() == kTileRank && view.getSizes().size() == kTileRank;
+    if (!denseView) {
+        return std::nullopt;
+    }
+    auto parent = cast<TileBufType>(view.getSource().getType());
+    auto result = cast<TileBufType>(view.getType());
+    int64_t rows = parent.getShape()[0];
+    int64_t cols = parent.getShape()[1];
+    bool fullRow = rows >= 2 && rows <= std::numeric_limits<uint32_t>::max() &&
+                   getNonnegativeConstant(view.getOffsets()[1]) == 0 &&
+                   cast<IntegerAttr>(view.getSizes()[0]).getInt() == 1 &&
+                   cast<IntegerAttr>(view.getSizes()[1]).getInt() == cols && result.getShape()[0] == 1 &&
+                   result.getShape()[1] == cols && result.getElementType() == parent.getElementType();
+    if (!fullRow) {
+        return std::nullopt;
+    }
+    return DenseRowAccess{view.getSource(), static_cast<uint64_t>(rows), view.getOffsets()[0]};
+}
+
+struct RowSlotAccess {
+    Value allocation;
+    uint64_t count;
+    RowSlotForm slot;
+};
+
+static std::optional<RowSlotAccess> getRowSlotAccess(Value value)
+{
+    auto access = getDenseRowAccess(value);
+    if (!access) {
+        return std::nullopt;
+    }
+    auto slot = getRowSlotForm(access->row, access->count);
+    if (!slot) {
+        return std::nullopt;
+    }
+    return RowSlotAccess{access->allocation, access->count, *slot};
 }
 
 } // namespace
@@ -263,6 +278,34 @@ bool areDisjointSubviewSlots(Value a, Value b) {
   return left && right && left->allocation == right->allocation &&
          left->count == right->count && left->slot.symbol == right->slot.symbol &&
          left->slot.offset != right->slot.offset;
+}
+
+bool areSubviewIterationsDisjoint(Value a, Value b, scf::ForOp forOp)
+{
+    if (!a || !b || !forOp) {
+        return false;
+    }
+    auto left = getDenseRowAccess(a);
+    auto right = getDenseRowAccess(b);
+    if (!left || !right || left->allocation != right->allocation || left->count != right->count ||
+        left->row != forOp.getInductionVar() || right->row != forOp.getInductionVar() ||
+        !forOp.isDefinedOutsideOfLoop(left->allocation)) {
+        return false;
+    }
+
+    auto lower = getNonnegativeConstant(forOp.getLowerBound());
+    auto upper = getNonnegativeConstant(forOp.getUpperBound());
+    auto step = getNonnegativeConstant(forOp.getStep());
+    if (!lower || !upper || step != 1 || *lower > *upper || *upper > left->count ||
+        *upper > getIndexLimit(forOp.getInductionVar().getType())) {
+        return false;
+    }
+
+    // Every execution selects exactly its induction-variable row. Unit steps
+    // within the parent and the positive signed index range cannot wrap, so
+    // ANY two distinct iterations select disjoint byte ranges. Proving only
+    // adjacent rows would be insufficient for rotating or strided aliases.
+    return true;
 }
 
 } // namespace mlir::pto

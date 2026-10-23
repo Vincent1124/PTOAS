@@ -896,69 +896,77 @@ static bool isForwardDepDroppableBySlotAffine(const BaseMemInfo *a,
 void InsertSyncAnalysis::MemAnalyze(
     CompoundInstanceElement *nowCompound, CompoundInstanceElement *frontCompound,
     SyncRecordList &syncRecordList,
-    const std::optional<unsigned> &forEndIndex) {
-  if (isAlreadySync(nowCompound, frontCompound, syncRecordList, 0)) {
-    return;
-  }
-
-  DepBaseMemInfoPairVec depVec;
-  if (!IsMemInfoHasDependency(nowCompound, frontCompound, depVec)) {
-    return;
-  }
-
-  // Same-iter (forward) deps: drop pairs that the affine analysis proves
-  // touch disjoint slots in every iteration of the multi-buffer loop.
-  // THIS drop never looks at back-edge deps: a rotating slot set still needs
-  // per-slot syncing through the dyn-event-id pipeline, so a slot-disjointness
-  // argument does not transfer to the back edge.
-  if (!forEndIndex.has_value()) {
-    // Subviews still use a single conservative memory range on backedges.
-    // Pruning their forward edges inside a loop would change event priming
-    // without a slot-keyed event model. Keep the existing loop behavior.
-    bool allowSubviewSlots = isOutsideLoops(nowCompound->elementOp) &&
-                             isOutsideLoops(frontCompound->elementOp);
-    auto isDroppable = [allowSubviewSlots](const std::pair<const BaseMemInfo *,
-                                          const BaseMemInfo *> &pair) {
-      return isForwardDepDroppableBySlotAffine(pair.first, pair.second,
-                                               allowSubviewSlots);
-    };
-    depVec.erase(std::remove_if(depVec.begin(), depVec.end(), isDroppable),
-                 depVec.end());
-    if (depVec.empty()) {
-      return;
-    }
-  }
-
-  // Carried deps whose two iterations provably touch disjoint memory. Kept separate
-  // from the forward drop above because this case only arrives on the back-edge pass,
-  // which the forward drop deliberately does not look at.
-  if (forEndIndex.has_value()) {
-    scf::ForOp carryingFor = carryingForOf(syncIR_, forEndIndex);
-    auto isDroppableCarried = [&](const std::pair<const BaseMemInfo *, const BaseMemInfo *> &pair) {
-      return isCarriedSelfDepAffineDisjoint(nowCompound, frontCompound, pair, carryingFor);
-    };
-    depVec.erase(std::remove_if(depVec.begin(), depVec.end(), isDroppableCarried), depVec.end());
-    if (depVec.empty()) {
-      return;
-    }
-  }
-
-  if (CanPrunePipeVBarrier(nowCompound, frontCompound, depVec, forEndIndex)) {
-    return;
-  }
-
-  if (forEndIndex.has_value()) {
-    int eventIdNum = GetEventIdNum(depVec);
-    for (int i = 1; i < eventIdNum; i++) {
-      if (isAlreadySync(nowCompound, frontCompound, syncRecordList,
-                        static_cast<unsigned>(i))) {
+    const std::optional<unsigned> &forEndIndex)
+{
+    if (isAlreadySync(nowCompound, frontCompound, syncRecordList, 0)) {
         return;
-      }
     }
-  }
 
-  InsertSyncOperation(nowCompound, frontCompound, depVec, forEndIndex);
-  UpdateSyncRecordInfo(frontCompound, syncRecordList);
+    DepBaseMemInfoPairVec depVec;
+    if (!IsMemInfoHasDependency(nowCompound, frontCompound, depVec)) {
+        return;
+    }
+
+    // Same-iter (forward) deps: drop pairs that the affine analysis proves
+    // touch disjoint slots in every iteration of the multi-buffer loop.
+    // THIS drop never looks at back-edge deps: a rotating slot set still needs
+    // per-slot syncing through the dyn-event-id pipeline, so a slot-disjointness
+    // argument does not transfer to the back edge.
+    if (!forEndIndex.has_value()) {
+        // Subviews still use a single conservative memory range on backedges.
+        // Pruning their forward edges inside a loop would change event priming
+        // without a slot-keyed event model. Keep the existing loop behavior.
+        bool allowSubviewSlots = isOutsideLoops(nowCompound->elementOp) &&
+                                 isOutsideLoops(frontCompound->elementOp);
+        auto isDroppable = [allowSubviewSlots](const std::pair<const BaseMemInfo *, const BaseMemInfo *> &pair) {
+            return isForwardDepDroppableBySlotAffine(pair.first, pair.second, allowSubviewSlots);
+        };
+        depVec.erase(std::remove_if(depVec.begin(), depVec.end(), isDroppable), depVec.end());
+        if (depVec.empty()) {
+            return;
+        }
+    }
+
+    // Carried deps whose two iterations provably touch disjoint memory. Kept separate
+    // from the forward drop above because this case only arrives on the back-edge pass,
+    // which the forward drop deliberately does not look at.
+    if (forEndIndex.has_value()) {
+        scf::ForOp carryingFor = carryingForOf(syncIR_, forEndIndex);
+        // InsertBackForSync first scans the copied slice with forEndIndex set,
+        // but those pairs are still in the same iteration. Only its second scan
+        // uses an original syncIR_ consumer to compare different iterations.
+        bool isCarriedTraversal = syncIR_[nowCompound->GetIndex()].get() == nowCompound;
+        auto isDroppableCarried = [&](const std::pair<const BaseMemInfo *, const BaseMemInfo *> &pair) {
+            // Unlike the self-only GM proof, disjoint UB rows may be accessed by
+            // different operations, including mutually exclusive branch writers.
+            // The row proof excludes reuse at every positive iteration distance.
+            if (isCarriedTraversal && pair.first && pair.second &&
+                areSubviewIterationsDisjoint(pair.first->baseBuffer, pair.second->baseBuffer, carryingFor)) {
+                return true;
+            }
+            return isCarriedSelfDepAffineDisjoint(nowCompound, frontCompound, pair, carryingFor);
+        };
+        depVec.erase(std::remove_if(depVec.begin(), depVec.end(), isDroppableCarried), depVec.end());
+        if (depVec.empty()) {
+            return;
+        }
+    }
+
+    if (CanPrunePipeVBarrier(nowCompound, frontCompound, depVec, forEndIndex)) {
+        return;
+    }
+
+    if (forEndIndex.has_value()) {
+        int eventIdNum = GetEventIdNum(depVec);
+        for (int i = 1; i < eventIdNum; i++) {
+            if (isAlreadySync(nowCompound, frontCompound, syncRecordList, static_cast<unsigned>(i))) {
+                return;
+            }
+        }
+    }
+
+    InsertSyncOperation(nowCompound, frontCompound, depVec, forEndIndex);
+    UpdateSyncRecordInfo(frontCompound, syncRecordList);
 }
 
 
