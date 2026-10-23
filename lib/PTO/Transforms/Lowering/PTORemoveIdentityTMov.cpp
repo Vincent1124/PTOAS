@@ -380,7 +380,8 @@ struct PTORemoveIdentityTMovPass
       MemoryDependentAnalyzer memAnalyzer;
       SyncIRs syncIR;
       Buffer2MemInfoMap buffer2MemInfoMap;
-      PTOIRTranslator translator(syncIR, memAnalyzer, buffer2MemInfoMap, func,
+      OpAccessMemInfos opAccessMemInfos;
+      PTOIRTranslator translator(syncIR, memAnalyzer, buffer2MemInfoMap, opAccessMemInfos, func,
                                  SyncAnalysisMode::NORMALSYNC);
       translator.Build();
 

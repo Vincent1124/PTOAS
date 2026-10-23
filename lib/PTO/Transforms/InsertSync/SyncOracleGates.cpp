@@ -1939,7 +1939,7 @@ public:
     // the module attribute, so the oracle and the emitter cannot drift apart.
     isA5 = pto::isTargetArchA5(func.getOperation());
 
-    PTOIRTranslator translator(syncIR, memAnalyzer, buffer2MemInfoMap, func, SyncAnalysisMode::NORMALSYNC);
+    PTOIRTranslator translator(syncIR, memAnalyzer, buffer2MemInfoMap, opAccessMemInfos, func, SyncAnalysisMode::NORMALSYNC);
     translator.Build();
 
     for (auto &element : syncIR) {
@@ -1998,6 +1998,7 @@ private:
   MemoryDependentAnalyzer memAnalyzer;
   SyncIRs syncIR;
   Buffer2MemInfoMap buffer2MemInfoMap;
+  OpAccessMemInfos opAccessMemInfos;
   llvm::SmallVector<pto::CompoundInstanceElement *> compounds;
   DepBaseMemInfoPairVec scratch, allPairs;
   uint8_t &at(unsigned i, unsigned j) { return reach[size_t(i) * n + j]; }

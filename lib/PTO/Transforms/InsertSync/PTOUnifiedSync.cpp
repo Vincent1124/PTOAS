@@ -250,6 +250,8 @@ private:
   SyncIRs syncIR;
   SyncOperations syncOpsStorage;
   Buffer2MemInfoMap buffer2MemInfoMap;
+  // Translator is local to analyzeHazards(); keep its op-specific ranges here.
+  OpAccessMemInfos opAccessMemInfos;
   BufidSyncAnalysis bufAnalysis;
   const SmallVector<VirtualBufId> &clusters;
   unified::SyncModel model;
@@ -267,7 +269,7 @@ private:
   LogicalResult analyzeHazards() {
     // --- Reused front-end: build the hazard set H (no id assignment) --------
 
-    PTOIRTranslator translator(syncIR, memAnalyzer, buffer2MemInfoMap, func, SyncAnalysisMode::NORMALSYNC);
+    PTOIRTranslator translator(syncIR, memAnalyzer, buffer2MemInfoMap, opAccessMemInfos, func, SyncAnalysisMode::NORMALSYNC);
     translator.Build();
     if (syncIR.size() <= 1) {
       return success();

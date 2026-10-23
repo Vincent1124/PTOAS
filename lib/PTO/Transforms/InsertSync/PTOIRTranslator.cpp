@@ -119,33 +119,32 @@ appendUniqueMemInfo(SmallVectorImpl<std::unique_ptr<BaseMemInfo>> &infos,
 
 } // namespace
 
+// 按 arith cast 语义重算整数值：trunci 截断、extui 零扩展、extsi 和
+// index_cast 符号扩展或截断（index 按 64 位处理）。
+static llvm::APInt applyIntegerCast(Operation *castOp, const llvm::APInt &in) {
+  Type resultType = castOp->getResult(0).getType();
+  unsigned width = resultType.isIndex() ? IndexType::kInternalStorageBitWidth
+                                        : resultType.getIntOrFloatBitWidth();
+  if (isa<arith::TruncIOp>(castOp)) {
+    return in.trunc(width);
+  }
+  if (isa<arith::ExtUIOp>(castOp)) {
+    return in.zext(width);
+  }
+  return in.sextOrTrunc(width);
+}
+
+// 只穿透整数 cast，并按每一步的语义精确计算结果；直接剥掉 cast 会把
+// 例如 256 -> trunci i8 的 0 误认成 256，进而错判地址或窗口不重叠。
 static bool getConstIndexValue(Value value, int64_t &out) {
-  while (true) {
-    if (auto castOp = value.getDefiningOp<arith::IndexCastOp>()) {
-      value = castOp.getIn();
-      continue;
+  SmallVector<Operation *, 4> casts;
+  while (Operation *def = value.getDefiningOp()) {
+    if (!isa<arith::IndexCastOp, arith::ExtSIOp, arith::ExtUIOp,
+             arith::TruncIOp>(def)) {
+      break;
     }
-    if (auto extOp = value.getDefiningOp<arith::ExtSIOp>()) {
-      value = extOp.getIn();
-      continue;
-    }
-    if (auto extOp = value.getDefiningOp<arith::ExtUIOp>()) {
-      value = extOp.getIn();
-      continue;
-    }
-    if (auto truncOp = value.getDefiningOp<arith::TruncIOp>()) {
-      value = truncOp.getIn();
-      continue;
-    }
-    break;
-  }
-  if (auto constIndex = value.getDefiningOp<arith::ConstantIndexOp>()) {
-    out = constIndex.value();
-    return true;
-  }
-  if (auto constInt = value.getDefiningOp<arith::ConstantIntOp>()) {
-    out = constInt.value();
-    return true;
+    casts.push_back(def);
+    value = def->getOperand(0);
   }
   auto constOp = value.getDefiningOp<arith::ConstantOp>();
   auto intAttr =
@@ -153,7 +152,14 @@ static bool getConstIndexValue(Value value, int64_t &out) {
   if (!intAttr) {
     return false;
   }
-  out = intAttr.getInt();
+  llvm::APInt bits = intAttr.getValue();
+  for (Operation *castOp : llvm::reverse(casts)) {
+    bits = applyIntegerCast(castOp, bits);
+  }
+  if (!bits.isSignedIntN(64)) {
+    return false;
+  }
+  out = bits.getSExtValue();
   return true;
 }
 
@@ -316,11 +322,150 @@ static bool updateAccColumnAliasBufferInfo(pto::SubViewOp op,
   return true;
 }
 
+// boxed Mat Tile 中一个矩形窗口的物理字节分段（相对 Tile 基址）。
+struct BoxedTileRegion {
+  SmallVector<uint64_t> offsets;
+  uint64_t segmentBytes = 0;
+};
+
+// boxed INT8 Tile 的外层分形块尺寸；nz 表示 Nz 布局，否则为 Zn 布局。
+// 分形内层尺寸均为 2 的幂，以 log2 记录，用移位和掩码代替除法和取余。
+struct BoxedTileLayout {
+  bool nz = false;
+  int64_t rows = 0;
+  int64_t cols = 0;
+  unsigned innerRowsLog2 = 0;
+  unsigned innerColsLog2 = 0;
+};
+
+// 仅接受 Mat 上普通 INT8、512B 分形、非 compact 的 Nz/Zn 静态 Tile。
+static std::optional<BoxedTileLayout> getBoxedI8Layout(pto::TileBufType type) {
+  if (!type || getTileAddressSpace(type) != pto::AddressSpace::MAT ||
+      !type.getElementType().isInteger(8) ||
+      !isStaticRank2Shape(type.getShape()) ||
+      type.getSFractalSizeI32() != 512 ||
+      type.getCompactModeI32() !=
+          static_cast<int32_t>(pto::CompactMode::Null)) {
+    return std::nullopt;
+  }
+  int32_t bl = type.getBLayoutValueI32();
+  int32_t sl = type.getSLayoutValueI32();
+  bool nz = bl == static_cast<int32_t>(pto::BLayout::ColMajor) &&
+            sl == static_cast<int32_t>(pto::SLayout::RowMajor);
+  bool zn = bl == static_cast<int32_t>(pto::BLayout::RowMajor) &&
+            sl == static_cast<int32_t>(pto::SLayout::ColMajor);
+  if (!nz && !zn) {
+    return std::nullopt;
+  }
+  constexpr unsigned kInnerShortLog2 = 4; // 16
+  constexpr unsigned kInnerLongLog2 = 5;  // 32
+  BoxedTileLayout layout;
+  layout.nz = nz;
+  layout.rows = type.getShape()[0];
+  layout.cols = type.getShape()[1];
+  layout.innerRowsLog2 = nz ? kInnerShortLog2 : kInnerLongLog2;
+  layout.innerColsLog2 = nz ? kInnerLongLog2 : kInnerShortLog2;
+  return layout;
+}
+
+// 一维窗口 [offset, offset + size) 落在 [0, extent) 内且按 2^innerLog2 对齐。
+static bool isAlignedWindow(int64_t offset, int64_t size, int64_t extent,
+                            unsigned innerLog2) {
+  const int64_t mask = (int64_t{1} << innerLog2) - 1;
+  return extent > 0 && offset >= 0 && size > 0 && offset <= extent - size &&
+         (extent & mask) == 0 && (offset & mask) == 0 && (size & mask) == 0;
+}
+
+// 首尾相接的分段合并为一个连续范围，避免等价访问因表示不同而影响
+// 后续同步去重。
+static void mergeContiguousSegments(BoxedTileRegion &region) {
+  for (size_t i = 1; i < region.offsets.size(); ++i) {
+    if (region.offsets[i] != region.offsets[i - 1] + region.segmentBytes) {
+      return;
+    }
+  }
+  if (region.offsets.size() > 1) {
+    region.segmentBytes *= region.offsets.size();
+    region.offsets.resize(1);
+  }
+}
+
+// 仅证明 Mat 上普通 INT8、512B 分形的 Nz/Zn 布局，且窗口沿完整分形边界切分：
+//   Nz: 每个外层块列（32 列）内各行连续存放，窗口每块列贡献一段；
+//   Zn: 每个外层块行（32 行）内各列连续存放，窗口每块行贡献一段。
+// 偏移与 pto-isa GetTileOffset 一致。其它 dtype/compact/未对齐窗口返回 nullopt，
+// 由调用方保守回退。
+static std::optional<BoxedTileRegion>
+getBoxedTileRegion(pto::TileBufType type, int64_t rowOffset, int64_t colOffset,
+                   int64_t rowSize, int64_t colSize) {
+  auto layout = getBoxedI8Layout(type);
+  if (!layout ||
+      !isAlignedWindow(rowOffset, rowSize, layout->rows,
+                       layout->innerRowsLog2) ||
+      !isAlignedWindow(colOffset, colSize, layout->cols,
+                       layout->innerColsLog2)) {
+    return std::nullopt;
+  }
+  // 段数上限只用于约束编译期开销。
+  constexpr int64_t kMaxSegments = 4096;
+  // 以下各量已由 isAlignedWindow 保证非负且按分形对齐，移位即精确除法。
+  bool nz = layout->nz;
+  unsigned rowLog2 = layout->innerRowsLog2;
+  unsigned colLog2 = layout->innerColsLog2;
+  int64_t innerRows = int64_t{1} << rowLog2;
+  int64_t innerCols = int64_t{1} << colLog2;
+  int64_t count = nz ? (colSize >> colLog2) : (rowSize >> rowLog2);
+  if (count > kMaxSegments) {
+    return std::nullopt;
+  }
+
+  BoxedTileRegion region;
+  region.segmentBytes =
+      static_cast<uint64_t>(nz ? rowSize * innerCols : colSize * innerRows);
+  region.offsets.reserve(static_cast<size_t>(count));
+  for (int64_t block = 0; block < count; ++block) {
+    int64_t offset =
+        nz ? ((colOffset >> colLog2) + block) * layout->rows * innerCols +
+                 rowOffset * innerCols
+           : ((rowOffset >> rowLog2) + block) * layout->cols * innerRows +
+                 colOffset * innerRows;
+    region.offsets.push_back(static_cast<uint64_t>(offset));
+  }
+  mergeContiguousSegments(region);
+  return region;
+}
+
+// 嵌套 subview 可能继承更大父 Tile 的物理 stride，只有直接来自 alloc_tile
+// 的源 Tile 才能用自身 shape 作为物理布局。
+static std::optional<BoxedTileRegion>
+getBoxedSubViewRegion(pto::SubViewOp op, pto::TileBufType sourceType) {
+  if (!op.getSource().getDefiningOp<pto::AllocTileOp>() ||
+      op.getOffsets().size() != kTileRank2D) {
+    return std::nullopt;
+  }
+  auto sizesAttr = op.getSizes();
+  if (!sizesAttr || sizesAttr.size() != kTileRank2D) {
+    return std::nullopt;
+  }
+  int64_t rowOffset = 0;
+  int64_t colOffset = 0;
+  if (!getConstIndexValue(op.getOffsets()[0], rowOffset) ||
+      !getConstIndexValue(op.getOffsets()[1], colOffset)) {
+    return std::nullopt;
+  }
+  return getBoxedTileRegion(sourceType, rowOffset, colOffset,
+                            cast<IntegerAttr>(sizesAttr[0]).getInt(),
+                            cast<IntegerAttr>(sizesAttr[1]).getInt());
+}
+
 static std::optional<SmallVector<uint64_t>>
 getPtoSubViewBaseAddresses(pto::SubViewOp op, pto::TileBufType sourceType,
                            int64_t elemBytes) {
   if (!isStaticRank2Shape(sourceType.getShape())) {
     return std::nullopt;
+  }
+  if (auto region = getBoxedSubViewRegion(op, sourceType)) {
+    return region->offsets;
   }
   if (sourceType.getSLayoutValueI32() !=
       static_cast<int32_t>(pto::SLayout::NoneBox)) {
@@ -816,7 +961,9 @@ void PTOIRTranslator::UpdatePTOOpInfoWithPipeline(Operation *op,
        // 只有当 Value 在我们的 BufferMap 中有记录时，才视为有效依赖
        // (过滤掉比如 Loop Iterator 或其他标量)
        if (isa<MemoryEffects::Read>(effect.getEffect())) {
-          UpdateDefUseVec({val}, useVec);
+          if (!UpdateTExtractReadRegion(op, val, useVec)) {
+            UpdateDefUseVec({val}, useVec);
+          }
        } else if (isa<MemoryEffects::Write>(effect.getEffect())) {
           UpdateDefUseVec({val}, defVec);
        }
@@ -1175,6 +1322,9 @@ void PTOIRTranslator::UpdateSlotSelectedAliasBufferInfo(Value result,
 static uint64_t getSubViewSegmentSize(pto::SubViewOp op,
                                       pto::TileBufType sourceType,
                                       unsigned elemBytes) {
+  if (auto region = getBoxedSubViewRegion(op, sourceType)) {
+    return region->segmentBytes;
+  }
   auto sizesAttr = op.getSizes();
   int64_t rowSize = cast<IntegerAttr>(sizesAttr[0]).getInt();
   int64_t colSize = cast<IntegerAttr>(sizesAttr[1]).getInt();
@@ -1194,6 +1344,43 @@ static bool hasSingleBaseAllocatedParents(
     }
   }
   return true;
+}
+
+// 父 Tile 地址已知、不与未知范围别名，且 [0, end) 落在其分配范围内。
+static bool fitsKnownParentRange(
+    const llvm::SmallVector<std::unique_ptr<BaseMemInfo>> &parentInfos,
+    uint64_t end) {
+  for (auto &parentInfo : parentInfos) {
+    if (!parentInfo || parentInfo->aliasesUnknownRange ||
+        !parentInfo->hasKnownPhysicalAddresses ||
+        parentInfo->baseAddresses.size() != 1 ||
+        end > parentInfo->allocateSize ||
+        parentInfo->baseAddresses[0] >
+            std::numeric_limits<uint64_t>::max() - end) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// 为 result 克隆 source 的每个父 MemInfo，基址按 offsets 偏移，大小为 segmentSize。
+static void appendOffsetAliasMemInfos(Buffer2MemInfoMap &buffer2MemInfoMap,
+                                      Value result, Value source,
+                                      ArrayRef<uint64_t> offsets,
+                                      uint64_t segmentSize) {
+  auto &resultMemInfoVec = buffer2MemInfoMap[result];
+  for (auto &parentInfo : buffer2MemInfoMap[source]) {
+    auto newInfo = parentInfo->clone(result);
+    SmallVector<uint64_t> addresses;
+    addresses.reserve(offsets.size());
+    uint64_t parentBase = parentInfo->baseAddresses[0];
+    for (uint64_t offset : offsets) {
+      addresses.push_back(parentBase + offset);
+    }
+    newInfo->baseAddresses = std::move(addresses);
+    newInfo->allocateSize = segmentSize;
+    resultMemInfoVec.emplace_back(std::move(newInfo));
+  }
 }
 
 void PTOIRTranslator::UpdateTileSubViewAliasBufferInfo(pto::SubViewOp op) {
@@ -1235,20 +1422,16 @@ void PTOIRTranslator::UpdateTileSubViewAliasBufferInfo(pto::SubViewOp op) {
     UpdateConservativeAliasBufferInfo(result, source);
     return;
   }
-
-  auto &resultMemInfoVec = buffer2MemInfoMap_[result];
-  for (auto &parentInfo : buffer2MemInfoMap_[source]) {
-    auto newInfo = parentInfo->clone(result);
-    SmallVector<uint64_t> addresses;
-    addresses.reserve(subViewAddresses->size());
-    uint64_t parentBase = parentInfo->baseAddresses[0];
-    for (uint64_t offset : *subViewAddresses) {
-      addresses.push_back(parentBase + offset);
-    }
-    newInfo->baseAddresses = std::move(addresses);
-    newInfo->allocateSize = segmentSize;
-    resultMemInfoVec.emplace_back(std::move(newInfo));
+  // boxed 分段只在父 Tile 的物理范围已知、且分段不越界时使用。
+  if (getBoxedSubViewRegion(op, sourceType) &&
+      !fitsKnownParentRange(buffer2MemInfoMap_[source],
+                            subViewAddresses->back() + segmentSize)) {
+    UpdateConservativeAliasBufferInfo(result, source);
+    return;
   }
+
+  appendOffsetAliasMemInfos(buffer2MemInfoMap_, result, source,
+                            *subViewAddresses, segmentSize);
 }
 
 void PTOIRTranslator::UpdateDefUseVec(ValueRange values, SmallVector<const BaseMemInfo *> &vec) {
@@ -1259,6 +1442,71 @@ void PTOIRTranslator::UpdateDefUseVec(ValueRange values, SmallVector<const BaseM
       }
     }
   }
+}
+
+// TEXTRACT 源与目标为同 dtype/布局的 MAT->LEFT/RIGHT 搬运，目标为非 compact
+// 的静态 Tile 时，读窗口才能由目标物理 shape 推出。
+static bool isRefinableTExtract(pto::TileBufType sourceType,
+                                pto::TileBufType destType) {
+  if (!sourceType || !destType || !isStaticRank2Shape(destType.getShape()) ||
+      sourceType.getElementType() != destType.getElementType() ||
+      sourceType.getBLayoutValueI32() != destType.getBLayoutValueI32() ||
+      sourceType.getSLayoutValueI32() != destType.getSLayoutValueI32() ||
+      sourceType.getSFractalSizeI32() != destType.getSFractalSizeI32() ||
+      destType.getCompactModeI32() !=
+          static_cast<int32_t>(pto::CompactMode::Null)) {
+    return false;
+  }
+  pto::AddressSpace destSpace = getTileAddressSpace(destType);
+  return destSpace == pto::AddressSpace::LEFT ||
+         destSpace == pto::AddressSpace::RIGHT;
+}
+
+// 用目标物理 shape 覆盖最大读取范围，而不是可能动态变化的 valid shape。
+static std::optional<BoxedTileRegion>
+getTExtractReadRegion(pto::TExtractOp extract) {
+  auto sourceType = dyn_cast<pto::TileBufType>(extract.getSrc().getType());
+  auto destType = dyn_cast<pto::TileBufType>(extract.getDst().getType());
+  if (!isRefinableTExtract(sourceType, destType)) {
+    return std::nullopt;
+  }
+  int64_t rowOffset = 0;
+  int64_t colOffset = 0;
+  if (!getConstIndexValue(extract.getIndexRow(), rowOffset) ||
+      !getConstIndexValue(extract.getIndexCol(), colOffset)) {
+    return std::nullopt;
+  }
+  return getBoxedTileRegion(sourceType, rowOffset, colOffset,
+                            destType.getShape()[0], destType.getShape()[1]);
+}
+
+bool PTOIRTranslator::UpdateTExtractReadRegion(
+    Operation *op, Value source, SmallVector<const BaseMemInfo *> &vec) {
+  auto extract = dyn_cast<pto::TExtractOp>(op);
+  if (!extract || source != extract.getSrc() ||
+      !source.getDefiningOp<pto::AllocTileOp>()) {
+    return false;
+  }
+  auto region = getTExtractReadRegion(extract);
+  auto found = buffer2MemInfoMap_.find(source);
+  if (!region || region->offsets.empty() || found == buffer2MemInfoMap_.end() ||
+      found->second.empty() ||
+      !fitsKnownParentRange(found->second,
+                            region->offsets.back() + region->segmentBytes)) {
+    return false;
+  }
+  // 读窗口只属于这条指令，不能写回源 Tile 的全局别名表。
+  for (auto &parentInfo : found->second) {
+    auto info = parentInfo->clone(source);
+    info->baseAddresses.clear();
+    for (uint64_t offset : region->offsets) {
+      info->baseAddresses.push_back(parentInfo->baseAddresses[0] + offset);
+    }
+    info->allocateSize = region->segmentBytes;
+    vec.push_back(info.get());
+    opAccessMemInfos_.push_back(std::move(info));
+  }
+  return true;
 }
 
 // ============================================================================

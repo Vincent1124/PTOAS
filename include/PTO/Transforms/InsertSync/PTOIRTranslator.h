@@ -32,12 +32,14 @@ public:
   PTOIRTranslator(SyncIRs &syncIR,
                   MemoryDependentAnalyzer &memDepAnalyzer,
                   Buffer2MemInfoMap &buffer2MemInfoMap,
+                  OpAccessMemInfos &opAccessMemInfos,
                   func::FuncOp func,
                   SyncAnalysisMode syncAnalysisMode)
     : func_(func), 
       index(0),
       syncIR_(syncIR), 
       buffer2MemInfoMap_(buffer2MemInfoMap),
+      opAccessMemInfos_(opAccessMemInfos),
       memAnalyzer_(memDepAnalyzer),
       mode_(syncAnalysisMode) {
     (void)memAnalyzer_;
@@ -63,6 +65,9 @@ private:
   // 核心数据结构 (定义在 SyncCommon.h 中)
   SyncIRs &syncIR_;
   Buffer2MemInfoMap &buffer2MemInfoMap_;
+  // Owner of instruction-specific access ranges referenced from compound
+  // def/use lists. Supplied by the caller so it outlives this translator.
+  OpAccessMemInfos &opAccessMemInfos_;
   MemoryDependentAnalyzer &memAnalyzer_;
   SyncAnalysisMode mode_;
  
@@ -112,6 +117,10 @@ private:
 
   // 根据 Values 填充 Def/Use 列表
   void UpdateDefUseVec(ValueRange values, SmallVector<const BaseMemInfo *> &vec);
+  // 为 MAT->LEFT/RIGHT 的 TEXTRACT 记录源 Tile 实际读取的物理窗口；
+  // 无法证明时返回 false，由调用方回退为整个源 Tile。
+  bool UpdateTExtractReadRegion(Operation *op, Value source,
+                                SmallVector<const BaseMemInfo *> &vec);
 
   // 调试辅助
   std::string getPipelineName(PipelineType pipe) const;

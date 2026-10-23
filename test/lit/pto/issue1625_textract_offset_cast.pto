@@ -1,0 +1,63 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt --pto-insert-sync %s | FileCheck %s
+// Issue #1625 follow-up: TEXTRACT offsets reached through integer casts must
+// be evaluated with the cast semantics. Run the pass directly so that no
+// canonicalization folds the casts first.
+//   256 : i64 -> trunci i8 = 0  : the read window [0, 2048) overlaps the TLOAD.
+//   64  : i64 -> trunci i8 = 64 : the read window starts at 64 * 128 bytes.
+
+module attributes {pto.target_arch = "a2a3"} {
+  // CHECK-LABEL: func.func @truncated_row_overlaps(
+  // CHECK: pto.textract
+  // CHECK: pto.set_flag[<PIPE_MTE1>, <PIPE_MTE2>
+  // CHECK: pto.wait_flag[<PIPE_MTE1>, <PIPE_MTE2>
+  // CHECK: pto.tload
+  func.func @truncated_row_overlaps(%src: !pto.ptr<i8>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c64 = arith.constant 64 : index
+    %wide = arith.constant 256 : i64
+    %a0 = arith.constant 0 : i64
+    %truncated = arith.trunci %wide : i64 to i8
+    %row = arith.index_cast %truncated : i8 to index
+    %tv = pto.make_tensor_view %src, shape = [%c32, %c64], strides = [%c64, %c1] : !pto.tensor_view<?x?xi8>
+    %input = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c32, %c64] : !pto.tensor_view<?x?xi8> -> !pto.partition_tensor_view<32x64xi8>
+    %source = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=512, cols=128, v_row=512, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %right = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %write = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=64, v_row=32, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    pto.textract ins(%source, %row, %c0 : !pto.tile_buf<loc=mat, dtype=i8, rows=512, cols=128, v_row=512, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>, index, index) outs(%right : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x64xi8>) outs(%write : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=64, v_row=32, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    return
+  }
+
+  // CHECK-LABEL: func.func @value_preserving_trunc_disjoint(
+  // CHECK: pto.textract
+  // CHECK-NOT: <PIPE_MTE1>, <PIPE_MTE2>
+  // CHECK: pto.tload
+  func.func @value_preserving_trunc_disjoint(%src: !pto.ptr<i8>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c64 = arith.constant 64 : index
+    %wide = arith.constant 64 : i64
+    %a0 = arith.constant 0 : i64
+    %truncated = arith.trunci %wide : i64 to i8
+    %row = arith.index_cast %truncated : i8 to index
+    %tv = pto.make_tensor_view %src, shape = [%c32, %c64], strides = [%c64, %c1] : !pto.tensor_view<?x?xi8>
+    %input = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c32, %c64] : !pto.tensor_view<?x?xi8> -> !pto.partition_tensor_view<32x64xi8>
+    %source = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=512, cols=128, v_row=512, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %right = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %write = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=64, v_row=32, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    pto.textract ins(%source, %row, %c0 : !pto.tile_buf<loc=mat, dtype=i8, rows=512, cols=128, v_row=512, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>, index, index) outs(%right : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x64xi8>) outs(%write : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=64, v_row=32, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    return
+  }
+}

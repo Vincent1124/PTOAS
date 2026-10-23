@@ -81,8 +81,9 @@ void PTOBufidSyncPass::runOnOperation() {
   }
   SyncIRs syncIR;
   Buffer2MemInfoMap buffer2MemInfoMap;
+  OpAccessMemInfos opAccessMemInfos;
   MemoryDependentAnalyzer memAnalyzer;
-  PTOIRTranslator translator(syncIR, memAnalyzer, buffer2MemInfoMap, func,
+  PTOIRTranslator translator(syncIR, memAnalyzer, buffer2MemInfoMap, opAccessMemInfos, func,
                              SyncAnalysisMode::NORMALSYNC);
   translator.Build();
   if (enableBufidSyncDebug) {

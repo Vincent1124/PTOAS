@@ -60,14 +60,13 @@ static bool hasGatherScatterLikeOps(func::FuncOp func) {
 }
 
 struct PTOInsertSyncPass : public mlir::pto::impl::PTOInsertSyncBase<PTOInsertSyncPass> {
-  void runOnOperation() override {
-    func::FuncOp func = getOperation();
+  static bool shouldSkip(func::FuncOp func) {
     // Backend-partitioned PTODSL containers carry private func declarations
     // in the outer child module to model cross-child calls. Those declaration
     // funcs have a function type but no entry block arguments, so the
     // translator's argument walk must not run on them.
     if (func.isDeclaration()) {
-      return;
+      return true;
     }
 
     // If the function already contains explicit synchronization ops (either
@@ -85,7 +84,12 @@ struct PTOInsertSyncPass : public mlir::pto::impl::PTOInsertSyncBase<PTOInsertSy
       }
       return WalkResult::advance();
     });
-    if (hasExplicitSync) {
+    return hasExplicitSync;
+  }
+
+  void runOnOperation() override {
+    func::FuncOp func = getOperation();
+    if (shouldSkip(func)) {
       return;
     }
 
@@ -94,9 +98,12 @@ struct PTOInsertSyncPass : public mlir::pto::impl::PTOInsertSyncBase<PTOInsertSy
     SyncIRs syncIR;
     SyncOperations syncOpsStorage;
     Buffer2MemInfoMap buffer2MemInfoMap;
+    OpAccessMemInfos opAccessMemInfos;
 
     // 1. Translator: 构建 SyncIR
-    PTOIRTranslator translator(syncIR, memAnalyzer, buffer2MemInfoMap, func, SyncAnalysisMode::NORMALSYNC);
+    PTOIRTranslator translator(syncIR, memAnalyzer, buffer2MemInfoMap,
+                               opAccessMemInfos, func,
+                               SyncAnalysisMode::NORMALSYNC);
     translator.Build();
 
     // 如果 IR 太简单，直接跳过

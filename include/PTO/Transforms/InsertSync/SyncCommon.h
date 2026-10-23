@@ -245,8 +245,9 @@ public:
   SmallVector<Value> depRootBuffers;
   // The BaseMemInfo objects behind this dependency, kept so a consumer can
   // recover the TILE identity `(scope, baseAddr, size)` rather than the coarse
-  // root above. Owned by the translator's `Buffer2MemInfoMap`; these are raw
-  // pointers into that arena, which every analysis in the pipeline shares.
+  // root above. Owned by the translator's `Buffer2MemInfoMap` or, for
+  // instruction-specific ranges, its `OpAccessMemInfos`; these are raw
+  // pointers into those arenas, which every analysis in the pipeline shares.
   //
   // This exists because `InsertSyncAnalysis` HAS these pointers when it builds a
   // sync pair and used to discard them, keeping only the roots -- which left the
@@ -507,6 +508,11 @@ using SyncIRs = SmallVector<std::unique_ptr<InstanceElement>>;
 using SyncOperations = SmallVector<SmallVector<std::unique_ptr<SyncOperation>>>;
 using Buffer2MemInfoMap =
     llvm::DenseMap<Value, llvm::SmallVector<std::unique_ptr<BaseMemInfo>>>;
+// Access ranges that belong to one instruction rather than to a buffer value,
+// e.g. the source window actually read by a TEXTRACT. They must not be stored
+// in Buffer2MemInfoMap, which every user of the value shares. Compounds hold
+// raw pointers into this storage, so it must live as long as the SyncIR.
+using OpAccessMemInfos = llvm::SmallVector<std::unique_ptr<BaseMemInfo>>;
  
 // Utilities
 bool checkAllParentLoopsAreForLoops(Operation *op);
