@@ -190,14 +190,16 @@ def simt_ops_vote_probe(dst: pto.ptr(pto.i32, "gm")):
 
 ---
 
-#### `pto.shuffle_idx(value: ScalarType, index: Index, *, width: int = 32) -> ScalarType`
-#### `pto.shuffle_up(value: ScalarType, offset: Index, *, width: int = 32) -> ScalarType`
-#### `pto.shuffle_down(value: ScalarType, offset: Index, *, width: int = 32) -> ScalarType`
-#### `pto.shuffle_bfly(value: ScalarType, mask: Index, *, width: int = 32) -> ScalarType`
+#### `pto.shuffle_idx(value: ScalarType, index: Index, *, width: int = 32, bound: int | None = None) -> ScalarType`
+#### `pto.shuffle_up(value: ScalarType, offset: Index, *, width: int = 32, bound: int | None = None) -> ScalarType`
+#### `pto.shuffle_down(value: ScalarType, offset: Index, *, width: int = 32, bound: int | None = None) -> ScalarType`
+#### `pto.shuffle_bfly(value: ScalarType, mask: Index, *, width: int = 32, bound: int | None = None) -> ScalarType`
 
 **Description**: Reads a scalar payload from another lane. `shuffle_idx` uses an
 absolute lane index, `shuffle_up` and `shuffle_down` use relative offsets, and
-`shuffle_bfly` uses a butterfly mask.
+`shuffle_bfly` uses a butterfly mask. Each subgroup of `width` lanes shuffles
+independently; a source lane outside the subgroup (or outside the source window
+selected by `bound`) hands the caller its own value back.
 
 **Parameters**:
 
@@ -205,7 +207,8 @@ absolute lane index, `shuffle_up` and `shuffle_down` use relative offsets, and
 |-----------|------|-------------|
 | `value` | PTO scalar | Payload to shuffle |
 | `index` / `offset` / `mask` | `i32`-compatible value | Lane selector |
-| `width` | Python `int` | Subgroup width, either `16` or `32` |
+| `width` | Python `int` | Subgroup width: `1`, `2`, `4`, `8`, `16` or `32` (default `32`) |
+| `bound` | Python `int` or `None` | Optional group-relative source-window boundary in `[0, width)` (the ISA's `Rm[12:8]` `max_ofst` field). For `shuffle_down`/`shuffle_bfly`/`shuffle_idx` it is the upper bound of the source lane; for `shuffle_up` it is the lower bound. Lanes outside the window keep their own value; `None` keeps the widest window. |
 
 **Returns**: PTO scalar with the same type as `value`.
 

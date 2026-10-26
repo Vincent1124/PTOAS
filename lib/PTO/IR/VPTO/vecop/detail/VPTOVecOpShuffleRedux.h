@@ -43,9 +43,23 @@ using namespace mlir::pto;
     return type.isF16() || type.isF32();
   }
 
+  // The ISA splits the 32-lane warp with a 5-bit lane_mask whose only legal
+  // values are 31, 30, 28, 24, 16 and 0, i.e. group sizes 1, 2, 4, 8, 16, 32.
+  inline bool isSupportedShuffleWidth(int64_t width) {
+    return width == 1 || width == 2 || width == 4 || width == 8 ||
+           width == 16 || width == mlir::pto::kValue32;
+  }
+
+  // `bound` bounds the source window inside a group (the ISA calls this field
+  // max_ofst in SHFL Rm[12:8]): max_lane = group_base + bound % width. A
+  // source lane is usable when src_lane <= max_lane for .down/.bfly/.idx and
+  // when src_lane >= max_lane for .up; outside the window the hardware returns
+  // the lane's own value. The ISA reduces the field modulo the group size, so
+  // accepting bound >= width would silently wrap; reject it.
   inline LogicalResult verifyShuffleSemanticControl(Operation *op,
                                                     Type controlType,
                                                     IntegerAttr widthAttr,
+                                                    IntegerAttr boundAttr,
                                                     StringRef ctrlName) {
     if (!isSupportedShuffleValueType(op->getResultTypes().front())) {
       return op->emitOpError()
@@ -57,8 +71,19 @@ using namespace mlir::pto;
     }
 
     int64_t width = widthAttr.getInt();
-    if (width != mlir::pto::kValue16 && width != mlir::pto::kValue32) {
-      return op->emitOpError() << "requires width to be 16 or 32";
+    if (!isSupportedShuffleWidth(width)) {
+      return op->emitOpError()
+             << "requires width to be a power of two in 1, 2, 4, 8, 16 or "
+                "32, got "
+             << width;
+    }
+    if (boundAttr) {
+      int64_t bound = boundAttr.getInt();
+      if (bound < 0 || bound >= width) {
+        return op->emitOpError()
+               << "requires bound to be in [0, width) i.e. [0, " << width
+               << "), got " << bound;
+      }
     }
     return success();
   }

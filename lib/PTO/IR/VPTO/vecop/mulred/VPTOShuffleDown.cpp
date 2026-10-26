@@ -16,5 +16,5 @@ using namespace mlir::pto::vecop_detail;
 
 LogicalResult ShuffleDownOp::verify() {
   return verifyShuffleSemanticControl(getOperation(), getOffset().getType(),
-                                      getWidthAttr(), "offset");
+                                      getWidthAttr(), getBoundAttr(), "offset");
 }

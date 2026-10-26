@@ -1359,25 +1359,30 @@ public:
 
     IntegerAttr widthAttr = op.getWidthAttr();
     Value controlValue;
-    unsigned controlMask = 0;
+    // Rm[12:8] (`bound`, the ISA's max_ofst) bounds the source window inside
+    // each group. The canonical value keeps the whole group usable: the last
+    // lane (31, which the ISA reduces modulo the group size) for down/bfly/idx
+    // and the group base for up, whose predicate compares the source against
+    // max_lane from below. An explicit bound narrows that window.
+    unsigned bound = 0x1f;
     if constexpr (std::is_same_v<ShuffleOp, pto::ShuffleIdxOp>) {
       controlValue = adaptor.getIndex();
-      controlMask = 0x1f;
     } else if constexpr (std::is_same_v<ShuffleOp, pto::ShuffleUpOp>) {
       controlValue = adaptor.getOffset();
-      controlMask = 0;
+      bound = 0;
     } else if constexpr (std::is_same_v<ShuffleOp, pto::ShuffleDownOp>) {
       controlValue = adaptor.getOffset();
-      controlMask = 0x1f;
     } else if constexpr (std::is_same_v<ShuffleOp, pto::ShuffleBflyOp>) {
       controlValue = adaptor.getMask();
-      controlMask = 0x1f;
     }
     if (!controlValue) {
       return rewriter.notifyMatchFailure(op, "missing shuffle control operand");
     }
+    if (IntegerAttr explicitBound = op.getBoundAttr()) {
+      bound = static_cast<unsigned>(explicitBound.getInt());
+    }
 
-    Value control = buildShuffleControlValue(rewriter, op.getLoc(), controlValue, widthAttr.getInt(), controlMask);
+    Value control = buildShuffleControlValue(rewriter, op.getLoc(), controlValue, widthAttr.getInt(), bound);
 
     Type i32Type = rewriter.getI32Type();
     auto funcType = rewriter.getFunctionType(TypeRange{resultType, i32Type}, TypeRange{resultType});

@@ -763,7 +763,8 @@ def PTO_ShuffleIdxOp : PTO_SimtOp<"shuffle_idx", [Pure, AllTypesMatch<["value", 
   let arguments = (ins
     PTO_SimtShuffleValueType:$value,
     I32:$index,
-    DefaultValuedAttr<I32Attr, "32">:$width
+    DefaultValuedAttr<I32Attr, "32">:$width,
+    OptionalAttr<I32Attr>:$bound
   );
   let results = (outs PTO_SimtShuffleValueType:$result);
   let hasVerifier = 1;
@@ -776,7 +777,8 @@ def PTO_ShuffleUpOp : PTO_SimtOp<"shuffle_up", [Pure, AllTypesMatch<["value", "r
   let arguments = (ins
     PTO_SimtShuffleValueType:$value,
     I32:$offset,
-    DefaultValuedAttr<I32Attr, "32">:$width
+    DefaultValuedAttr<I32Attr, "32">:$width,
+    OptionalAttr<I32Attr>:$bound
   );
   let results = (outs PTO_SimtShuffleValueType:$result);
   let hasVerifier = 1;
@@ -789,7 +791,8 @@ def PTO_ShuffleDownOp : PTO_SimtOp<"shuffle_down", [Pure, AllTypesMatch<["value"
   let arguments = (ins
     PTO_SimtShuffleValueType:$value,
     I32:$offset,
-    DefaultValuedAttr<I32Attr, "32">:$width
+    DefaultValuedAttr<I32Attr, "32">:$width,
+    OptionalAttr<I32Attr>:$bound
   );
   let results = (outs PTO_SimtShuffleValueType:$result);
   let hasVerifier = 1;
@@ -802,7 +805,8 @@ def PTO_ShuffleBflyOp : PTO_SimtOp<"shuffle_bfly", [Pure, AllTypesMatch<["value"
   let arguments = (ins
     PTO_SimtShuffleValueType:$value,
     I32:$mask,
-    DefaultValuedAttr<I32Attr, "32">:$width
+    DefaultValuedAttr<I32Attr, "32">:$width,
+    OptionalAttr<I32Attr>:$bound
   );
   let results = (outs PTO_SimtShuffleValueType:$result);
   let hasVerifier = 1;

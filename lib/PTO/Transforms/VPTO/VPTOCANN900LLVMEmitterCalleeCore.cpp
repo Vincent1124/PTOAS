@@ -137,11 +137,14 @@ StringRef buildVstasCallee(MLIRContext *context, bool post) {
 }
 
 Value buildShuffleControlValue(OpBuilder &builder, Location loc, Value controlValue, int64_t widthValue,
-                               unsigned controlMask) {
+                               unsigned bound) {
+  // SHFL control word (ISA Rm): [4:0] shfl_idx, [12:8] max_ofst and
+  // [20:16] lane_mask = 32 - width; the remaining bits are instruction
+  // encoding.
   Value lowBits = builder.create<arith::AndIOp>(loc, controlValue, getI32Constant(builder, loc, 0x1f));
   Value encodedWidth = getI32Constant(builder, loc, static_cast<uint32_t>(32 - widthValue) << 16);
-  Value encodedMask = getI32Constant(builder, loc, static_cast<uint32_t>(controlMask) << 8);
-  Value highBits = builder.create<arith::OrIOp>(loc, encodedWidth, encodedMask);
+  Value encodedBound = getI32Constant(builder, loc, static_cast<uint32_t>(bound) << 8);
+  Value highBits = builder.create<arith::OrIOp>(loc, encodedWidth, encodedBound);
   return builder.create<arith::OrIOp>(loc, highBits, lowBits);
 }
 

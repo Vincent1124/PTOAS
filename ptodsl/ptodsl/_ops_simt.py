@@ -220,45 +220,103 @@ def vote_ballot(pred):
     return wrap_surface_value(_pto.VoteBallotOp(unwrap_surface_value(pred)).result)
 
 
+# The ISA splits a warp with a 5-bit lane_mask whose only legal values are
+# 31, 30, 28, 24, 16 and 0, so a shuffle subgroup has 1, 2, 4, 8, 16 or 32 lanes.
+_SHUFFLE_WIDTHS = (1, 2, 4, 8, 16, 32)
+
+
 def _validate_shuffle_width(width, *, context: str):
-    if width not in (16, 32):
-        raise ValueError(f"{context} expects width to be 16 or 32, got {width}")
+    if isinstance(width, bool) or width not in _SHUFFLE_WIDTHS:
+        raise ValueError(
+            f"{context} expects width to be one of {_SHUFFLE_WIDTHS}, got {width}"
+        )
     return width
 
 
-def shuffle_idx(value, index, *, width=32):
-    """``pto.shuffle_idx`` – read a payload from an absolute SIMT lane index."""
+def _validate_shuffle_bound(bound, width, *, context: str):
+    """Validate the optional group-relative source-window boundary.
+
+    ``bound`` maps to the ISA's ``Rm[12:8]`` field (the manual calls it
+    ``max_ofst``): the hardware bounds the shuffled source lane to
+    ``group_base + bound % width`` (an upper bound for ``down``/``bfly``/``idx``
+    and a lower bound for ``up``) and returns the lane's own value outside that
+    window.
+    """
+    if bound is None:
+        return None
+    if isinstance(bound, bool) or not isinstance(bound, int):
+        raise TypeError(
+            f"{context} expects bound to be an int, got {type(bound).__name__}"
+        )
+    if bound < 0 or bound >= width:
+        raise ValueError(
+            f"{context} expects bound in [0, width) = [0, {width}), got {bound}"
+        )
+    return bound
+
+
+def shuffle_idx(value, index, *, width=32, bound=None):
+    """``pto.shuffle_idx`` – read a payload from an absolute SIMT lane index.
+
+    ``width`` is the subgroup size; ``bound`` optionally narrows the source
+    window inside each subgroup (see :func:`_validate_shuffle_bound`).
+    """
+    width = _validate_shuffle_width(width, context="shuffle_idx(..., width)")
     return wrap_surface_value(_pto.ShuffleIdxOp(
         unwrap_surface_value(value),
         _coerce_i32_operand(index, context="shuffle_idx(..., index)"),
-        width=_validate_shuffle_width(width, context="shuffle_idx(..., width)"),
+        width=width,
+        bound=_validate_shuffle_bound(
+            bound, width, context="shuffle_idx(..., bound)"
+        ),
     ).result)
 
 
-def shuffle_up(value, offset, *, width=32):
-    """``pto.shuffle_up`` – read a payload from a lower-index SIMT lane."""
+def shuffle_up(value, offset, *, width=32, bound=None):
+    """``pto.shuffle_up`` – read a payload from a lower-index SIMT lane.
+
+    ``bound`` acts as the lower bound of the source window for this mode.
+    """
+    width = _validate_shuffle_width(width, context="shuffle_up(..., width)")
     return wrap_surface_value(_pto.ShuffleUpOp(
         unwrap_surface_value(value),
         _coerce_i32_operand(offset, context="shuffle_up(..., offset)"),
-        width=_validate_shuffle_width(width, context="shuffle_up(..., width)"),
+        width=width,
+        bound=_validate_shuffle_bound(
+            bound, width, context="shuffle_up(..., bound)"
+        ),
     ).result)
 
 
-def shuffle_down(value, offset, *, width=32):
-    """``pto.shuffle_down`` – read a payload from a higher-index SIMT lane."""
+def shuffle_down(value, offset, *, width=32, bound=None):
+    """``pto.shuffle_down`` – read a payload from a higher-index SIMT lane.
+
+    ``bound`` acts as the upper bound of the source window for this mode.
+    """
+    width = _validate_shuffle_width(width, context="shuffle_down(..., width)")
     return wrap_surface_value(_pto.ShuffleDownOp(
         unwrap_surface_value(value),
         _coerce_i32_operand(offset, context="shuffle_down(..., offset)"),
-        width=_validate_shuffle_width(width, context="shuffle_down(..., width)"),
+        width=width,
+        bound=_validate_shuffle_bound(
+            bound, width, context="shuffle_down(..., bound)"
+        ),
     ).result)
 
 
-def shuffle_bfly(value, mask, *, width=32):
-    """``pto.shuffle_bfly`` – read a payload from a butterfly-selected SIMT lane."""
+def shuffle_bfly(value, mask, *, width=32, bound=None):
+    """``pto.shuffle_bfly`` – read a payload from a butterfly-selected SIMT lane.
+
+    ``bound`` acts as the upper bound of the source window for this mode.
+    """
+    width = _validate_shuffle_width(width, context="shuffle_bfly(..., width)")
     return wrap_surface_value(_pto.ShuffleBflyOp(
         unwrap_surface_value(value),
         _coerce_i32_operand(mask, context="shuffle_bfly(..., mask)"),
-        width=_validate_shuffle_width(width, context="shuffle_bfly(..., width)"),
+        width=width,
+        bound=_validate_shuffle_bound(
+            bound, width, context="shuffle_bfly(..., bound)"
+        ),
     ).result)
 
 

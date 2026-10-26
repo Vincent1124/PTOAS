@@ -302,19 +302,23 @@ Example:
 ## Shuffle Ops
 
 Shuffle ops exchange values between participating lanes. The source value and
-result have the same type.
+result have the same type. The 32-lane warp is split into subgroups of `width`
+lanes, and a shuffle only reads lanes of the caller's own subgroup: a source
+lane that falls outside the subgroup, or outside the source window selected by
+`bound`, hands the caller its own value back.
 
 ### `pto.shuffle_idx`
 
 - **syntax:** `%r = pto.shuffle_idx %value, %index {width = 16 : i32} : T, i32 -> T`
-- **semantics:** Read `%value` from absolute `%index` inside the current
-  subgroup.
-- **inputs:** `%value` is the current lane's payload. `%index` is the
-  source lane index inside the subgroup.
+- **semantics:** Read `%value` from the absolute lane
+  `group_base + %index % width` of the current subgroup; `%index` wraps around
+  the subgroup.
+- **inputs:** `%value` is the current lane's payload. `%index` is the source
+  lane index inside the subgroup.
 - **outputs:** `%r` is the selected source lane's value.
 - **constraints and limitations:** `T` is `i32`, `i64`, `f16`, `f32`, or
-  `vector<2xf16>`. `%index` is `i32`. `width` is `16` or `32` and defaults to
-  `32`.
+  `vector<2xf16>`. `%index` is `i32`. `width` is `1`, `2`, `4`, `8`, `16` or
+  `32` and defaults to `32`.
 
 ### `pto.shuffle_up` / `pto.shuffle_down` / `pto.shuffle_bfly`
 
@@ -323,23 +327,38 @@ result have the same type.
 %u = pto.shuffle_up %value, %offset : T, i32 -> T
 %d = pto.shuffle_down %value, %offset : T, i32 -> T
 %b = pto.shuffle_bfly %value, %mask : T, i32 -> T
+%w = pto.shuffle_down %value, %offset {bound = 3 : i32, width = 8 : i32} : T, i32 -> T
 ```
 - **semantics:**
 ```text
 group_base = floor(lane / width) * width
 local_lane = lane - group_base
+max_lane   = group_base + bound % width
 shuffle_up:   source = group_base + local_lane - offset
 shuffle_down: source = group_base + local_lane + offset
 shuffle_bfly: source = group_base + (local_lane xor mask)
-result        = value[source] when source is a valid participating lane
+in_window  = (mode == up) ? source >= max_lane : source <= max_lane
+result     = value[source] when in_window, else value[lane]
 ```
 - **inputs:** `%value` is the current lane's payload. `%offset` is the
   relative lane distance. `%mask` is the XOR mask for butterfly selection.
-- **outputs:** The selected source lane's value.
+- **outputs:** The selected source lane's value, or the caller's own value when
+  the source lane falls outside the source window.
 - **constraints and limitations:** `T` is `i32`, `i64`, `f16`, `f32`, or
   `vector<2xf16>`. Control operands are `i32`. The optional `width` attribute is
-  `16` or `32` and defaults to `32`. Out-of-range source-lane behavior is
-  target-scoped and should not be used for portable algorithms.
+  `1`, `2`, `4`, `8`, `16` or `32` and defaults to `32`. The optional `bound`
+  attribute bounds the source window inside each subgroup and must be in
+  `[0, width)`; it defaults to the widest window (`width - 1` for
+  `shuffle_down`/`shuffle_bfly`/`shuffle_idx`, `0` for `shuffle_up`). A source
+  lane outside the window yields the caller's own value; a source lane that is
+  not active yields an undefined result.
+
+- **hardware mapping:** each op lowers to one `SHFL.mode` instruction whose
+  `Rm` control word is `Rm[4:0] = index | offset | mask`,
+  `Rm[12:8] = bound` (the ISA names this field `max_ofst`) and
+  `Rm[20:16] = 32 - width`. The instruction also
+  reports, per lane, whether the value came from another lane; PTO exposes only
+  the value.
 
 ---
 

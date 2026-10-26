@@ -16,5 +16,5 @@ using namespace mlir::pto::vecop_detail;
 
 LogicalResult ShuffleIdxOp::verify() {
   return verifyShuffleSemanticControl(getOperation(), getIndex().getType(),
-                                      getWidthAttr(), "index");
+                                      getWidthAttr(), getBoundAttr(), "index");
 }

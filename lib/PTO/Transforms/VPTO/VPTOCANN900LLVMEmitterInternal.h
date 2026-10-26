@@ -474,7 +474,7 @@ StringRef buildThreadfenceBlockCallee(MLIRContext *context);
 StringRef buildVstarCallee(MLIRContext *context);
 StringRef buildVstasCallee(MLIRContext *context, bool post);
 Value buildShuffleControlValue(OpBuilder &builder, Location loc, Value controlValue, int64_t widthValue,
-                               unsigned controlMask);
+                               unsigned bound);
 FailureOr<StringRef> buildAtomicCalleeName(MLIRContext *context, Type ptrType, Type valueType, Attribute signednessAttr,
                                            StringRef opName);
 FailureOr<StringRef> buildL1CacheLoadCallee(MLIRContext *context, Type resultType, pto::L1Cache l1cache);

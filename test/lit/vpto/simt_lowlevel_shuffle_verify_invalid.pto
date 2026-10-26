@@ -6,15 +6,56 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// RUN: not ptoas --pto-arch=a5 --pto-backend=vpto %s -o - 2>&1 | FileCheck %s
+// The ISA splits a warp with a 5-bit lane mask whose only legal values are
+// 31, 30, 28, 24, 16 and 0, so only 1, 2, 4, 8, 16 and 32-lane subgroups exist.
+// bound bounds the source window inside a subgroup and the hardware reduces
+// it modulo the subgroup size, so a value outside [0, width) is rejected
+// instead of silently wrapping.
+//
+// RUN: not pto-test-opt %s -split-input-file 2>&1 | FileCheck %s
 
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
-  func.func @kernel() attributes {pto.aicore, pto.simt_entry} {
+  func.func @bad_width() attributes {pto.aicore, pto.simt_entry} {
     %value = arith.constant 7 : i32
     %index = arith.constant 3 : i32
     %bad = pto.shuffle_idx %value, %index {width = 24 : i32} : i32, i32 -> i32
     return
   }
 }
+// CHECK: error: 'pto.shuffle_idx' op requires width to be a power of two in 1, 2, 4, 8, 16 or 32, got 24
 
-// CHECK: requires width to be 16 or 32
+// -----
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @bad_bound() attributes {pto.aicore, pto.simt_entry} {
+    %value = arith.constant 7 : i32
+    %offset = arith.constant 1 : i32
+    %bad = pto.shuffle_up %value, %offset {bound = 8 : i32, width = 8 : i32} : i32, i32 -> i32
+    return
+  }
+}
+// CHECK: error: 'pto.shuffle_up' op requires bound to be in [0, width) i.e. [0, 8), got 8
+
+// -----
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @negative_bound() attributes {pto.aicore, pto.simt_entry} {
+    %value = arith.constant 7 : i32
+    %mask = arith.constant 1 : i32
+    %bad = pto.shuffle_bfly %value, %mask {bound = -1 : i32, width = 4 : i32} : i32, i32 -> i32
+    return
+  }
+}
+// CHECK: error: 'pto.shuffle_bfly' op requires bound to be in [0, width) i.e. [0, 4), got -1
+
+// -----
+
+// A narrow subgroup with an explicit source window is accepted.
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @narrow_window() attributes {pto.aicore, pto.simt_entry} {
+    %value = arith.constant 7 : i32
+    %offset = arith.constant 1 : i32
+    %ok = pto.shuffle_down %value, %offset {bound = 3 : i32, width = 8 : i32} : i32, i32 -> i32
+    return
+  }
+}

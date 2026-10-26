@@ -16,5 +16,5 @@ using namespace mlir::pto::vecop_detail;
 
 LogicalResult ShuffleBflyOp::verify() {
   return verifyShuffleSemanticControl(getOperation(), getMask().getType(),
-                                      getWidthAttr(), "mask");
+                                      getWidthAttr(), getBoundAttr(), "mask");
 }
