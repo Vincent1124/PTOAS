@@ -1389,6 +1389,12 @@ FailureOr<PhysicalValues> PlanGraphBuilder::buildNarrowingCast(
             std::string tag = (Twine("trunc:") + Twine(sourceIndex - begin)).str();
             partials.push_back(graph.addAction(PhysicalActionKind::Semantic, scope, {(source)[sourceIndex]}, tag)[0]);
         }
+        // The begin == end guard above already keeps this range non-empty, but
+        // state it explicitly: SmallVector inline storage is unconstructed, so
+        // an unguarded front() leaves GCC -O3 unable to prove the read is live.
+        if (partials.empty()) {
+            return failure();
+        }
         PhysicalValue merged = partials.front();
         for (PhysicalValue partial : llvm::drop_begin(partials)) {
             merged = graph.addAction(PhysicalActionKind::Merge, scope, {merged, partial}, "vor")[0];
