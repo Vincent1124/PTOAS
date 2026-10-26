@@ -1174,17 +1174,11 @@ private:
                                       *this->getTypeConverter());
   }
 
-  LogicalResult lowerF16(VMIVexpdifOp op, ValueRange xParts,
-                         ValueRange maxParts, ValueRange maskParts,
-                         ArrayRef<Type> resultTypes,
-                         OneToNPatternRewriter &rewriter) const {
-    const bool invalidArity =
-        resultTypes.size() != kInterleaveFactor * xParts.size();
-    if (invalidArity) {
-      return rewriter.notifyMatchFailure(
-          op, "f16 vexpdif requires EVEN/ODD f32 result parts");
-    }
-
+  LogicalResult lowerF16Interleaved(VMIVexpdifOp op, ValueRange xParts,
+                                    ValueRange maxParts,
+                                    ValueRange maskParts,
+                                    ArrayRef<Type> resultTypes,
+                                    OneToNPatternRewriter &rewriter) const {
     static constexpr StringRef kParts[] = {"EVEN", "ODD"};
     SmallVector<Value> results;
     results.reserve(resultTypes.size());
@@ -1192,7 +1186,8 @@ private:
       for (auto [chunkIndex, x] : llvm::enumerate(xParts)) {
         Value max = maxParts[chunkIndex];
         Value mask = maskParts[chunkIndex];
-        Type resultType = resultTypes[partIndex * xParts.size() + chunkIndex];
+        Type resultType =
+            resultTypes[partIndex * xParts.size() + chunkIndex];
         FailureOr<Value> result =
             lowerF16Part(op, x, max, mask, resultType, part, rewriter);
         if (failed(result)) {
@@ -1203,6 +1198,63 @@ private:
     }
     return replacePhysicalResults(rewriter, op, results,
                                   *this->getTypeConverter());
+  }
+
+  LogicalResult lowerF16Merged(VMIVexpdifOp op, ValueRange xParts,
+                               ValueRange maxParts, ValueRange maskParts,
+                               ArrayRef<Type> resultTypes,
+                               OneToNPatternRewriter &rewriter) const {
+    static constexpr StringRef kParts[] = {"EVEN", "ODD"};
+    SmallVector<Value> halfParts;
+    halfParts.reserve(kInterleaveFactor * xParts.size());
+    for (StringRef part : kParts) {
+      for (auto [chunkIndex, x] : llvm::enumerate(xParts)) {
+        Value max = maxParts[chunkIndex];
+        Value mask = maskParts[chunkIndex];
+        Type resultType = resultTypes[chunkIndex];
+        FailureOr<Value> half =
+            lowerF16Part(op, x, max, mask, resultType, part, rewriter);
+        if (failed(half)) {
+          return failure();
+        }
+        halfParts.push_back(*half);
+      }
+    }
+    FailureOr<SmallVector<Value>> merged = materializeDeinterleaved2ToContiguous(
+        op, halfParts, resultTypes, rewriter);
+    if (failed(merged)) {
+      return failure();
+    }
+    return replacePhysicalResults(rewriter, op, *merged,
+                                  *this->getTypeConverter());
+  }
+
+  LogicalResult lowerF16(VMIVexpdifOp op, ValueRange xParts,
+                         ValueRange maxParts, ValueRange maskParts,
+                         ArrayRef<Type> resultTypes,
+                         OneToNPatternRewriter &rewriter) const {
+    // From one full f16 physical part up, the interleave relation maps every
+    // source part to EVEN/ODD f32 result parts.
+    const bool hasInterleaveArity =
+        resultTypes.size() == kInterleaveFactor * xParts.size();
+    if (hasInterleaveArity) {
+      return lowerF16Interleaved(op, xParts, maxParts, maskParts, resultTypes,
+                                 rewriter);
+    }
+    // Below one full f16 physical part the merged contiguous relation keeps
+    // one result part per source part: compute the EVEN and ODD halves on
+    // the same packed source part and merge them back with vintlv, whose low
+    // output interleaves the two low halves, which is exactly the contiguous
+    // result part. The b16 mask covers the whole physical part, so the
+    // inactive upper lanes read back as the pmode zero value and only feed
+    // the discarded high output.
+    const bool hasContiguousArity = resultTypes.size() == xParts.size();
+    if (hasContiguousArity) {
+      return lowerF16Merged(op, xParts, maxParts, maskParts, resultTypes,
+                            rewriter);
+    }
+    return rewriter.notifyMatchFailure(
+        op, "f16 vexpdif requires EVEN/ODD f32 result parts");
   }
 
   LogicalResult lowerBySourceElementType(
