@@ -120,6 +120,17 @@ lookupVMIFpToFpContract(Type srcElem, Type dstElem) {
                             /*allowedRndModes=*/StringRef()};
   }
   if (srcBits != dstBits) {
+    // f32 -> f16 / f32 -> bf16 (32->16 narrow): direct physical F2F form
+    // whose A5 profile only encodes R/A/Z.  There is no half-up (H) form
+    // for these pairs, so H is rejected here instead of failing later in
+    // the backend instruction selector.
+    bool srcIsF32 = srcElem.isF32();
+    bool dstIsSixteenBitFloat = dstElem.isF16() || dstElem.isBF16();
+    if (srcIsF32 && dstIsSixteenBitFloat) {
+      return VMIFpToFpContract{/*requiresRnd=*/false, /*requiresSat=*/true,
+                              /*requiresPart=*/false,
+                              /*allowedRndModes=*/"RAZ"};
+    }
     return std::nullopt;
   }
   // bf16 -> f16: same-width, rnd, sat, no part.

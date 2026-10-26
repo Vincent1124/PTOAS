@@ -65,6 +65,7 @@
 #include "PTO/IR/PTO.h"
 #include "PTO/IR/PTOTypeUtils.h"
 #include "PTO/Transforms/Passes.h"
+#include "PTO/Transforms/VMILayoutSupport.h"
 #include "VMI/VMIIndexUtils.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -313,6 +314,62 @@ static LogicalResult lowerVCmps(VMIVcmpsOp op, OpBuilder &builder) {
 // Category C2 helper: vcvt
 //===----------------------------------------------------------------------===//
 
+/// A5 F2F has no direct f16/bf16 -> fp8 form: the only fp8-capable source
+/// width is f32 (the A5 tile ISA documents FP16 -> FP8_E4M3/FP8_E5M2 as
+/// unsupported).  Such narrows must stage through an exact f32 widen.
+static bool isFp8NarrowDestination(Type dstElem) {
+  return pto::isPTOFloat8E4M3LikeType(dstElem) ||
+         pto::isPTOFloat8E5M2LikeType(dstElem);
+}
+
+static bool needsFp8NarrowF32Staging(Type srcElem, Type dstElem,
+                                     VMICvtOp op) {
+  bool srcIsSixteenBitFloat = srcElem.isF16() || srcElem.isBF16();
+  if (!srcIsSixteenBitFloat) {
+    return false;
+  }
+  if (!isFp8NarrowDestination(dstElem)) {
+    return false;
+  }
+  return isa<VMIVRegType>(op.getSource().getType()) &&
+         isa<VMIVRegType>(op.getResult().getType());
+}
+
+/// Pick the layout for the staged f32 intermediate of a f16/bf16 -> fp8
+/// narrow.  Only hand-written IR carries explicit layouts this early; when
+/// both ends are explicit, choose a compatible f32 layout whose 16->32 widen
+/// leg and 32->8 narrow leg are both legal cast table rows, so the chain
+/// lowers without waiting for the layout solver.  Otherwise return a null
+/// layout and let the solver assign the intermediate.
+static Attribute pickStagedF32Layout(VMIVRegType srcVReg,
+                                     VMIVRegType dstVReg,
+                                     VMIVRegType f32VReg) {
+  VMILayoutAttr srcLayout = srcVReg.getLayoutAttr();
+  VMILayoutAttr dstLayout = dstVReg.getLayoutAttr();
+  if (!srcLayout || !dstLayout) {
+    return Attribute();
+  }
+  VMILayoutSupport supports;
+  auto widenFacts = supports.getCastLayoutFactsForLayout(
+      srcVReg, f32VReg, VMICastLayoutPort::Source, srcLayout);
+  if (failed(widenFacts)) {
+    return Attribute();
+  }
+  auto narrowFacts = supports.getCastLayoutFactsForLayout(
+      f32VReg, dstVReg, VMICastLayoutPort::Result, dstLayout);
+  if (failed(narrowFacts)) {
+    return Attribute();
+  }
+  for (const VMICastLayoutFact &widen : *widenFacts) {
+    for (const VMICastLayoutFact &narrow : *narrowFacts) {
+      if (widen.resultLayout == narrow.sourceLayout) {
+        return widen.resultLayout;
+      }
+    }
+  }
+  return Attribute();
+}
+
 /// Lower vcvt by dispatching on src→dst element types.
 static LogicalResult lowerVCvt(VMICvtOp op, OpBuilder &builder) {
   Type srcElem = getVMIElementType(op.getSource());
@@ -366,10 +423,32 @@ static LogicalResult lowerVCvt(VMICvtOp op, OpBuilder &builder) {
     }
   } else if (direction == "narrow_fp") {
     StringAttr roundingAttr = op.getRoundingAttr();
-    result = builder
-                 .create<VMITruncFOp>(loc, resultType, source, roundingAttr,
-                                     saturateAttr)
-            .getResult();
+    if (needsFp8NarrowF32Staging(srcElem, dstElem, op)) {
+      // Widen exactly to f32 first, then apply the user rounding/saturate
+      // on the f32 -> fp8 leg, which is the profile the hardware exposes.
+      auto srcVReg = cast<VMIVRegType>(source.getType());
+      auto dstVReg = cast<VMIVRegType>(resultType);
+      auto f32VReg = VMIVRegType::get(op->getContext(),
+                                      srcVReg.getElementCount(),
+                                      builder.getF32Type(), Attribute());
+      Attribute f32Layout = pickStagedF32Layout(srcVReg, dstVReg, f32VReg);
+      if (f32Layout) {
+        f32VReg = VMIVRegType::get(op->getContext(),
+                                   srcVReg.getElementCount(),
+                                   builder.getF32Type(), f32Layout);
+      }
+      Value widened =
+          builder.create<VMIExtFOp>(loc, f32VReg, source).getResult();
+      result = builder
+                   .create<VMITruncFOp>(loc, resultType, widened, roundingAttr,
+                                       saturateAttr)
+                   .getResult();
+    } else {
+      result = builder
+                   .create<VMITruncFOp>(loc, resultType, source, roundingAttr,
+                                       saturateAttr)
+                   .getResult();
+    }
   } else if (direction == "fptosi") {
     result = builder
             .create<VMIFPToSIOp>(loc, resultType, source,

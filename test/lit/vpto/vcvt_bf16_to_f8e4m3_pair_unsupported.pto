@@ -1,0 +1,27 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software: you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You should not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas --pto-arch=a5 --pto-backend=vpto %s 2>&1 | FileCheck %s
+
+// A5 F2F has no bf16 -> fp8 form at all (the simulator rejects RV_VCVT_F2F
+// with the fused 16->8 types), so the physical contract table carries no
+// F16 -> F8E4M3/F8E5M2 rows.  The VMI layer stages bf16 -> fp8 narrows
+// through f32 instead; a direct pto.vcvt must be rejected.
+
+// CHECK: error: 'pto.vcvt' op unsupported vcvt source/result element type pair
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @vcvt_bf16_to_f8e4m3_unsupported(%seed: bf16) {
+    pto.vecscope {
+      %mask_b16 = pto.pset_b16 "PAT_ALL" : !pto.mask<b16>
+      %src = pto.vdup %seed, %mask_b16 : bf16, !pto.mask<b16> -> !pto.vreg<128xbf16>
+      %f8 = pto.vcvt %src, %mask_b16 {rnd = "R", sat = "SAT", part = "EVEN"} : !pto.vreg<128xbf16>, !pto.mask<b16> -> !pto.vreg<256xf8E4M3FN>
+    }
+    return
+  }
+}

@@ -58,7 +58,7 @@
 
   | Attribute | Values | Valid for | Description |
   |---|---|---|---|
-  | `rounding` | `"R"` (nearest-even), `"A"` (round to nearest, ties away from zero), `"H"` (half-up), `"Z"` (toward-zero); for the `bf16x2→f4x2` contract pair the allowed set is `"R"`,`"A"`,`"F"` (floor), `"C"` (ceil), `"Z"` (toward-zero) — `"H"` is **rejected** | fp narrowing | Rounding mode |
+  | `rounding` | `"R"` (nearest-even), `"A"` (round to nearest, ties away from zero), `"H"` (half-up), `"Z"` (toward-zero); exceptions: the direct `f32→f16`/`f32→bf16` pairs allow only `"R"`/`"A"`/`"Z"` — `"H"` is **rejected** (the A5 F2F profile has no half-up form for these pairs); for the `bf16x2→f4x2` contract pair the allowed set is `"R"`,`"A"`,`"F"` (floor), `"C"` (ceil), `"Z"` (toward-zero) — `"H"` is **rejected** | fp narrowing | Rounding mode |
   | `saturate` | `"SAT"`, `"NOSAT"` | required for fp-narrow / int-narrow; for fp→si / fp→ui the requirement follows the vcvt contract's `requiresSat` (e.g. `f16→si8` required, `f16→si32` **forbidden** — no overflow possible; same-width `bf16→f16` required, same-width `f16→bf16` **forbidden**); the `bf16x2→f4x2` narrow has `requiresSat=false` — any `saturate` is **forbidden**; `si32→si8` int-narrow accepts only `"NOSAT"` | For signed destinations, `SAT` clamps to `[min, max]`; for unsigned or signless destinations, it clamps to `[0, max]`. `NOSAT` performs a direct bit truncation of the result representation. |
 
 - **datatypes:** Floating-point source and destination types are
@@ -76,9 +76,10 @@
 
 | Direction | Source → destination | `rounding` | `saturate` |
 |---|---|---|---|
-| FpWiden | `f16→f32`, `bf16→f32`, `fp8_e4m3→f16`, `fp8_e4m3→bf16`, `fp8_e4m3→f32`, `fp8_e5m2→f16`, `fp8_e5m2→bf16`, `fp8_e5m2→f32`, `hif8→f16`, `hif8→bf16`, `hif8→f32` | forbidden | forbidden |
+| FpWiden | `f16→f32`, `bf16→f32`, `fp8_e4m3→f16`, `fp8_e4m3→bf16`, `fp8_e4m3→f32`, `fp8_e5m2→f16`, `fp8_e5m2→bf16`, `fp8_e5m2→f32`, `hif8→f16`, `hif8→bf16`, `hif8→f32` — the `fp8`/`hif8` → `f16`/`bf16` pairs are staged through an exact f32 widen by the lowering (A5 F2F has no direct 8→16 form) | forbidden | forbidden |
 | FpWiden (packed) | `f4E1M2x2→bf16x2`, `f4E2M1x2→bf16x2` | forbidden | forbidden |
-| FpNarrow | `f32→f16`, `f32→bf16`, `f32→fp8_e4m3`, `f32→fp8_e5m2`, `f16→fp8_e4m3`, `f16→fp8_e5m2`, `bf16→fp8_e4m3`, `bf16→fp8_e5m2` | optional: `R`/`A`/`H`/`Z` (lowering defaults to `R`; `A` for hif8 targets) | required: `SAT`/`NOSAT` |
+| FpNarrow | `f32→f16`, `f32→bf16` | optional: `R`/`A`/`Z` (`H` rejected — the A5 F2F profile has no half-up form for these pairs; lowering defaults to `R`) | required: `SAT`/`NOSAT` |
+| FpNarrow | `f32→fp8_e4m3`, `f32→fp8_e5m2`, `f16→fp8_e4m3`, `f16→fp8_e5m2`, `bf16→fp8_e4m3`, `bf16→fp8_e5m2` | optional: `R`/`A`/`H`/`Z` (lowering defaults to `R`); `f16`/`bf16` sources are staged through an exact f32 widen — A5 F2F has no direct 16→8 form | required: `SAT`/`NOSAT` |
 | FpNarrow (same width) | `bf16→f16` | optional: `R`/`A`/`H`/`Z` | required: `SAT`/`NOSAT` |
 | FpNarrow (same width) | `f16→bf16` | optional: `R`/`A`/`H`/`Z` | forbidden |
 | FpNarrow (packed) | `bf16x2→f4E1M2x2`, `bf16x2→f4E2M1x2` | optional: `R`/`A`/`F`/`C`/`Z` (`H` rejected) | forbidden |
@@ -100,6 +101,7 @@
   | FpWiden (`8-bit→f16/bf16`, radix-2) | no single A5 `vcvt`; `vmi-lower-unified-to-legacy` expands it early into `extf 8-bit→f32` + `truncf f32→f16/bf16` | `2K` | `2` |
   | 8↔32 (radix-4) | widen: `UNPK_B8` + `vintlv` + `vcvt P0` + `punpack`; narrow: `PK4_B32` store (or `vselr` gather) + `ppack` | `2–3` | `2–3` |
   | f32→fp8 quant | `1 cast` + `PK4_B32` | `K` | `1` |
+  | f16/bf16→fp8 quant | staged: exact `vcvt` widen to f32 + f32→fp8 `vcvt{P0}` narrow (A5 F2F has no direct 16→8 form) | `~3K` | `2` |
   | f32→int8 quant | 3-stage cast + `PK4_B32` | `~3K` | `3` |
   | fp↔fp same-width (`bf16→f16`, `f16→bf16`) | `K × vcvt` (1:1, no part) | `K` | `1` |
   | fp→si / fp→ui | per contract pair: same-width 1:1, widen EVEN/ODD, narrow EVEN/ODD+Vor | `K`–`~3K` | `2`–`3` |
@@ -119,9 +121,15 @@
       -> !pto.vmi.vreg<128×f32>
   // → pto.as: 2 × pto.vcvt EVEN/ODD + ppack (parity companion)
 
-  // fp32 → fp16 narrow with half-up rounding
-  %n = pto.vmi.vcvt %y {rounding = "H", saturate = "SAT"}
+  // fp32 → fp16 narrow with away-from-zero rounding (H has no A5 form for
+  // the f32 → f16 / f32 → bf16 pairs)
+  %n = pto.vmi.vcvt %y {rounding = "A", saturate = "SAT"}
       : !pto.vmi.vreg<64×f32> -> !pto.vmi.vreg<64×f16>
+
+  // bf16 → fp8 quantized narrow (staged through an exact f32 widen; the
+  // rounding/saturate ride the f32 → fp8 leg)
+  %b8 = pto.vmi.vcvt %b {rounding = "H", saturate = "SAT"}
+      : !pto.vmi.vreg<64×bf16> -> !pto.vmi.vreg<64×fp8_e4m3>
 
   // ui8 -> i16 unsigned extension
   %z = pto.vmi.vcvt %a

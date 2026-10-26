@@ -1,0 +1,22 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software: you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas --emit-pto-ir %s 2>&1 | FileCheck %s
+
+// Legacy truncf form of the f32 -> bf16 half-up rejection: the A5 F2F profile
+// has no half-up form for the direct f32 -> bf16 pair (R/A/Z only).
+
+// CHECK: error: 'pto.vmi.truncf' op rounding attr is not valid for this fp-to-fp conversion type pair
+
+module {
+  func.func @f32_to_bf16_half_up(%source: !pto.vmi.vreg<64xf32>) {
+    %result = pto.vmi.truncf %source {rounding = "H", saturate = "SAT"}
+        : !pto.vmi.vreg<64xf32> -> !pto.vmi.vreg<64xbf16>
+    return
+  }
+}

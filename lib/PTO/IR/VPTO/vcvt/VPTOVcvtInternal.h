@@ -192,8 +192,11 @@ using namespace mlir::pto;
       return VcvtContract{true, true, true, VcvtPartFamily::Packed4, "RAHZ"};
     case VcvtElemKind::HiF8:
       return VcvtContract{true, true, true, VcvtPartFamily::Packed4, "AH"};
+    // A5 F2F has no half-up form for the f32 -> f16/bf16 pairs; their
+    // encodable rounding set is R/A/Z.
     case VcvtElemKind::F16:
     case VcvtElemKind::BF16:
+      return VcvtContract{true, true, true, std::nullopt, "RAZ"};
     case VcvtElemKind::S16:
     case VcvtElemKind::S64:
       return VcvtContract{true, true, true};
@@ -205,9 +208,8 @@ using namespace mlir::pto;
 
   [[maybe_unused]] inline std::optional<VcvtContract> lookupF16Contract(VcvtElemKind dst) {
     switch (dst) {
-    case VcvtElemKind::F8E4M3:
-    case VcvtElemKind::F8E5M2:
-      return VcvtContract{true, true, true, std::nullopt, "RAFZC"};
+    // No F8E4M3/F8E5M2 rows: A5 F2F has no f16 -> fp8 form at all; the
+    // f16 -> fp8 narrows stage through f32 at the VMI layer instead.
     case VcvtElemKind::HiF8:
       return VcvtContract{true, true, true, std::nullopt, "AH"};
     case VcvtElemKind::F32:
@@ -227,9 +229,8 @@ using namespace mlir::pto;
 
   [[maybe_unused]] inline std::optional<VcvtContract> lookupBF16Contract(VcvtElemKind dst) {
     switch (dst) {
-    case VcvtElemKind::F8E4M3:
-    case VcvtElemKind::F8E5M2:
-      return VcvtContract{true, true, true, std::nullopt, "RAFZC"};
+    // No F8E4M3/F8E5M2 rows: A5 F2F has no bf16 -> fp8 form at all; the
+    // bf16 -> fp8 narrows stage through f32 at the VMI layer instead.
     case VcvtElemKind::F4E1M2x2:
     case VcvtElemKind::F4E2M1x2:
       return VcvtContract{true, false, true, VcvtPartFamily::Packed4, "RAFZC"};

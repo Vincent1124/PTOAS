@@ -683,8 +683,9 @@ constexpr VcvtContractEntry kVcvtContractEntries[] = {
     {VcvtElemKind::F32, VcvtElemKind::S16, {"llvm.hivm.vcvtfi.f322s16.x", true, true, true, 32, false}},
     {VcvtElemKind::F32, VcvtElemKind::S32, {"llvm.hivm.vcvtfi.f322s32.x", true, true, false, 32, false}},
     {VcvtElemKind::F32, VcvtElemKind::S64, {"llvm.hivm.vcvtfi.f322s64.x", true, true, true, 32, false}},
-    {VcvtElemKind::F16, VcvtElemKind::F8E4M3, {"llvm.hivm.vcvtff.f162f8e4m3.x", true, true, true, 16, false}},
-    {VcvtElemKind::F16, VcvtElemKind::F8E5M2, {"llvm.hivm.vcvtff.f162f8e5m2.x", true, true, true, 16, false}},
+    // No F16/BF16 -> F8E4M3/F8E5M2 rows: A5 F2F has no f16/bf16 -> fp8 form
+    // at all (the simulator rejects RV_VCVT_F2F with the fused 16->8 types);
+    // those narrows stage through f32 at the VMI layer instead.
     {VcvtElemKind::F16, VcvtElemKind::HiF8, {"llvm.hivm.vcvtff.f162hif8.x", true, true, true, 16, false}},
     {VcvtElemKind::F16, VcvtElemKind::F32, {"llvm.hivm.vcvtff.f162f32.x", false, false, true, 16, false}},
     {VcvtElemKind::F16, VcvtElemKind::BF16, {"llvm.hivm.vcvtff.f162bf16.x", true, false, false, 16, false}},
@@ -692,8 +693,6 @@ constexpr VcvtContractEntry kVcvtContractEntries[] = {
     {VcvtElemKind::F16, VcvtElemKind::S16, {"llvm.hivm.vcvtfi.f162s16.x", true, true, false, 16, false}},
     {VcvtElemKind::F16, VcvtElemKind::S8, {"llvm.hivm.vcvtfi.f162s8.x", true, true, true, 16, false}},
     {VcvtElemKind::F16, VcvtElemKind::U8, {"llvm.hivm.vcvtfi.f162u8.x", true, true, true, 16, false}},
-    {VcvtElemKind::BF16, VcvtElemKind::F8E4M3, {"llvm.hivm.vcvtff.bf162f8e4m3.x", true, true, true, 16, false}},
-    {VcvtElemKind::BF16, VcvtElemKind::F8E5M2, {"llvm.hivm.vcvtff.bf162f8e5m2.x", true, true, true, 16, false}},
     {VcvtElemKind::BF16, VcvtElemKind::F4E1M2x2, {"llvm.hivm.vcvtff2.bf162f4e1m2x2.x", true, false, true, 16, false}},
     {VcvtElemKind::BF16, VcvtElemKind::F4E2M1x2, {"llvm.hivm.vcvtff2.bf162f4e2m1x2.x", true, false, true, 16, false}},
     {VcvtElemKind::BF16, VcvtElemKind::F16, {"llvm.hivm.vcvtff.bf162f16.x", true, true, false, 16, true}},

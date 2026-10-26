@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software: you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You should not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-mask-granularity-assignment -vmi-layout-assignment -vmi-to-vpto 2>&1 | FileCheck %s
+
+// Hand-written legacy pto.vmi.truncf does not go through the unified-vcvt
+// f32 staging (VMILowerUnifiedToLegacy only rewrites pto.vmi.vcvt), so a
+// f16/bf16 -> fp8 truncf physicalizes to the direct 16->8 pto.vcvt that the
+// A5 contract table rejects.  The clean up-front rejection replaces the
+// pre-fix behavior where the request compiled and crashed the simulator.
+
+// CHECK: error: 'pto.vcvt' op unsupported vcvt source/result element type pair
+
+module {
+  func.func @truncf_f16_to_f8e4m3_pair_unsupported(
+      %src: !pto.ptr<f16, ub>,
+      %dst: !pto.ptr<f8E4M3FN, ub>,
+      %offset: index) {
+    %wide = pto.vmi.vload %src[%offset]
+        : !pto.ptr<f16, ub> -> !pto.vmi.vreg<64xf16>
+    %packed = pto.vmi.truncf %wide {rounding = "R", saturate = "SAT"}
+        : !pto.vmi.vreg<64xf16> -> !pto.vmi.vreg<64xf8E4M3FN>
+    pto.vmi.vstore %packed, %dst[%offset]
+        : !pto.vmi.vreg<64xf8E4M3FN>, !pto.ptr<f8E4M3FN, ub>
+    return
+  }
+}

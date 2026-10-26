@@ -3874,7 +3874,9 @@ def vmi_wrapper_dispatch_probe():
     casted = pto.vmi.vcvt(shuffled, pto.f16)
     casted_r = pto.vmi.vcvt(shuffled, pto.f16, rounding="R", saturate="SAT")
     casted_a = pto.vmi.vcvt(shuffled, pto.f16, rounding="A", saturate="SAT")
-    casted_h = pto.vmi.vcvt(shuffled, pto.f16, rounding="H", saturate="SAT")
+    # f32 -> f16 has no A5 half-up form (R/A/Z only), so the H probe rides a
+    # pair that keeps H legal: f32 -> f8e4m3 allows R/A/H/Z.
+    casted_h = pto.vmi.vcvt(shuffled, pto.f8e4m3, rounding="H", saturate="SAT")
     casted_z = pto.vmi.vcvt(shuffled, pto.f16, rounding="Z", saturate="SAT")
     recast = pto.vmi.vinterpret_cast(
         lhs,
