@@ -8,19 +8,25 @@
 
 // Included by PTO.cpp as part of the PTO IR implementation translation unit.
 
-LogicalResult TMatmulBiasOp::verify() {
-  auto verifyA2A3 = [this]() -> LogicalResult {
-    return verifyMatBiasCommon(getOperation(), getA().getType(),
-                               getB().getType(), getBias().getType(),
-                               getDst().getType(), false);
-  };
-  auto verifyA5 = [this]() -> LogicalResult {
-    return verifyMatBiasCommon(getOperation(), getA().getType(),
-                               getB().getType(), getBias().getType(),
-                               getDst().getType(), false,
-                               /*allowLowPrecision=*/true);
-  };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+LogicalResult TMatmulBiasOp::verify()
+{
+    auto verifyA2A3 = [this]() -> LogicalResult {
+        return verifyMatBiasCommon(
+            getOperation(), getA().getType(), getB().getType(),
+            getBias().getType(), getDst().getType(), false);
+    };
+    auto verifyA5 = [this]() -> LogicalResult {
+        return verifyMatBiasCommon(
+            getOperation(), getA().getType(), getB().getType(),
+            getBias().getType(), getDst().getType(), false,
+            /*allowLowPrecision=*/true);
+    };
+    if (failed(dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5))) {
+        return failure();
+    }
+    return verifyMatmulTf32Mode(
+        getOperation(), getTf32Mode(), getA().getType(), getB().getType(),
+        getDst().getType());
 }
 
 static LogicalResult verifyA5MxMatOperands(Operation *op, Type a, Type b,

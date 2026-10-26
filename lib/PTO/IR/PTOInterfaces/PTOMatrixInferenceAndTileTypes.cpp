@@ -29,7 +29,10 @@ LogicalResult mlir::pto::TMatmulAccOp::verify() {
         }
         return success();
     };
-    return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+    if (failed(dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5)))
+        return failure();
+    return verifyMatmulTf32Mode(getOperation(), getTf32Mode(), getLhs().getType(),
+                                getRhs().getType(), getDst().getType());
 }
 
 LogicalResult mlir::pto::TGemvAccOp::verify() {

@@ -1466,41 +1466,62 @@ LogicalResult ExpandState::expandTileOpsInFunction(func::FuncOp func,
 // ============================================================================
 // Main entry point.
 // ============================================================================
-void ExpandTileOpPass::runOnOperation() {
-  ModuleOp mod = getOperation();
-  MLIRContext *ctx = &getContext();
+void ExpandTileOpPass::runOnOperation()
+{
+    ModuleOp mod = getOperation();
+    MLIRContext *ctx = &getContext();
 
-  bool hasExpandableOps = false;
-  mod.walk([&hasExpandableOps](Operation *op) {
-    if (pto::isTileLibExpandableOp(op)) {
-      hasExpandableOps = true;
-      return WalkResult::interrupt();
+    // Per-operation HF32 rounding (`tf32_mode`) is lowered by the EmitC backend
+    // only: the TileLib templates expanded here do not model it yet. Reject it
+    // loudly instead of silently dropping the precision request on the floor.
+    WalkResult tf32Walk = mod.walk([&](Operation *op) -> WalkResult {
+        if (!op->hasAttr("tf32_mode")) {
+            return WalkResult::advance();
+        }
+        if (isa<pto::TMatmulOp, pto::TMatmulAccOp, pto::TMatmulBiasOp>(op)) {
+            op->emitOpError()
+                << "tf32_mode is not supported by the vpto backend yet; "
+                << "use --pto-backend=emitc";
+            return WalkResult::interrupt();
+        }
+        return WalkResult::advance();
+    });
+    if (tf32Walk.wasInterrupted()) {
+        signalPassFailure();
+        return;
     }
-    return WalkResult::advance();
-  });
-  if (!hasExpandableOps) {
-    return;
-  }
 
-  std::shared_ptr<pto::TileLibService> tileLibService =
-      pto::TileLibRuntime::getService();
-  if (!tileLibService) {
-    mod.emitError("ExpandTileOp requires an initialized PTODSL runtime");
-    signalPassFailure();
-    return;
-  }
-
-  ExpandState state;
-  state.tileLibService = tileLibService;
-
-  for (auto func : mod.getOps<func::FuncOp>()) {
-    if (func.isExternal()) {
-      continue;
+    bool hasExpandableOps = false;
+    mod.walk([&hasExpandableOps](Operation *op) {
+        if (pto::isTileLibExpandableOp(op)) {
+            hasExpandableOps = true;
+            return WalkResult::interrupt();
+        }
+        return WalkResult::advance();
+    });
+    if (!hasExpandableOps) {
+        return;
     }
-    if (failed(state.expandTileOpsInFunction(func, mod, ctx))) {
-      return signalPassFailure();
+
+    std::shared_ptr<pto::TileLibService> tileLibService =
+        pto::TileLibRuntime::getService();
+    if (!tileLibService) {
+        mod.emitError("ExpandTileOp requires an initialized PTODSL runtime");
+        signalPassFailure();
+        return;
     }
-  }
+
+    ExpandState state;
+    state.tileLibService = tileLibService;
+
+    for (auto func : mod.getOps<func::FuncOp>()) {
+        if (func.isExternal()) {
+            continue;
+        }
+        if (failed(state.expandTileOpsInFunction(func, mod, ctx))) {
+            return signalPassFailure();
+        }
+    }
 }
 
 } // namespace

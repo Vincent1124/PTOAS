@@ -261,3 +261,32 @@ static LogicalResult verifyA5MxScaleStorage(Operation *op, Type scaleTy,
            << "expects " << scaleName << " to be in the scaling address space";
   return success();
 }
+
+/// Validates the optional `tf32_mode` attribute of the tile-level matmul ops.
+/// Per-operation HF32 rounding is an A5-only feature and only applies to FP32
+/// operands feeding an FP32 accumulator; hif8/fp8/bf16/f16 inputs run through
+/// their own precision channels (for hif8 the MAD family selects CTRL[45]).
+/// An unsupported request is rejected here instead of being silently lowered to
+/// ordinary FP32, which is what the EmitC backend used to do.
+static LogicalResult verifyMatmulTf32Mode(
+    Operation *op, std::optional<pto::Tf32Mode> mode, Type lhsTy, Type rhsTy,
+    Type dstTy)
+{
+    if (!mode) {
+        return success();
+    }
+    if (!isTargetArchA5(op)) {
+        return op->emitOpError()
+            << "expects tf32_mode to be used on A5 targets only";
+    }
+    Type lhsElem = getElemTy(lhsTy);
+    Type rhsElem = getElemTy(rhsTy);
+    Type dstElem = getElemTy(dstTy);
+    if (!lhsElem || !rhsElem || !dstElem || !lhsElem.isF32() ||
+        !rhsElem.isF32() || !dstElem.isF32()) {
+        return op->emitOpError()
+            << "expects f32 lhs/rhs and an f32 accumulator when tf32_mode is"
+            << " set, but got " << lhsElem << ", " << rhsElem << ", " << dstElem;
+    }
+    return success();
+}

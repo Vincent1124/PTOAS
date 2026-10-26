@@ -966,7 +966,8 @@ def TMatmulBiasOp : PTO_TOp<"tmatmul.bias", [
     PTODpsType:$b,
     PTODpsType:$bias,
     PTODpsType:$dst,
-    DefaultValuedAttr<PTO_AccPhaseAttr, "::mlir::pto::AccPhase::Unspecified">:$accPhase
+    DefaultValuedAttr<PTO_AccPhaseAttr, "::mlir::pto::AccPhase::Unspecified">:$accPhase,
+    OptionalAttr<PTO_Tf32ModeAttr>:$tf32_mode
   );
 
   let results = (outs Optional<AnyRankedTensor>:$result);
@@ -1111,7 +1112,8 @@ def TMatmulOp : PTO_TOp<"tmatmul", [
     PTODpsType:$lhs,
     PTODpsType:$rhs,
     PTODpsType:$dst,
-    DefaultValuedAttr<PTO_AccPhaseAttr, "::mlir::pto::AccPhase::Unspecified">:$accPhase
+    DefaultValuedAttr<PTO_AccPhaseAttr, "::mlir::pto::AccPhase::Unspecified">:$accPhase,
+    OptionalAttr<PTO_Tf32ModeAttr>:$tf32_mode
   );
 
   let results = (outs
@@ -1148,7 +1150,8 @@ def TMatmulAccOp : PTO_TOp<"tmatmul.acc", [
     PTODpsType:$lhs,
     PTODpsType:$rhs,
     PTODpsType:$dst,
-    DefaultValuedAttr<PTO_AccPhaseAttr, "::mlir::pto::AccPhase::Unspecified">:$accPhase
+    DefaultValuedAttr<PTO_AccPhaseAttr, "::mlir::pto::AccPhase::Unspecified">:$accPhase,
+    OptionalAttr<PTO_Tf32ModeAttr>:$tf32_mode
   );
 
   let results = (outs
