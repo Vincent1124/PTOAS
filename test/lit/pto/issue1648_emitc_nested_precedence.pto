@@ -1,0 +1,59 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// issue #1648: LLVM 19's CppEmitter loses the precedence of the sub-expression
+// it just parenthesized -- emitOperand pushes lowestPrecedence() after printing
+// '(' (TranslateToCpp.cpp:1337) instead of the sub-expression's own precedence,
+// so every operand inside those parentheses is printed bare. A nested
+// `arith.andi/ori` therefore came out as `(v1 & v2 & v3 | v4) & v5`, which C++
+// re-groups to `((v1 & v2 & v3) | v4) & v5`, silently changing the condition.
+//
+// FormEmitCExpressionsCompatPass must keep such producers as explicit
+// temporaries (a named value needs no parentheses), while leaving
+// precedence-safe shapes folded.
+//
+// RUN: ptoas --pto-arch=a3 %s -o - 2>&1 | FileCheck %s
+
+module {
+  func.func @mixed_bool(%a: i1, %b: i1, %c: i1, %d: i1, %e: i1) -> i1 {
+    %ab = arith.andi %a, %b : i1
+    %cd = arith.ori %c, %d : i1
+    %x = arith.andi %ab, %cd : i1
+    %y = arith.andi %x, %e : i1
+    return %y : i1
+  }
+
+  // Same failure class outside booleans: f32 has no casts to shield it, so
+  // `a - (b - (c - d))` used to be emitted as `v1 - (v2 - v3 - v4)`.
+  func.func @subf_chain(%a: f32, %b: f32, %c: f32, %d: f32) -> f32 {
+    %t = arith.subf %c, %d : f32
+    %s = arith.subf %b, %t : f32
+    %r = arith.subf %a, %s : f32
+    return %r : f32
+  }
+
+  // Precedence-safe shape: the `ori` is a direct operand of the root `andi`
+  // and is parenthesized with the correct context, so it must stay folded.
+  func.func @or_left(%a: i1, %b: i1, %c: i1) -> i1 {
+    %o = arith.ori %a, %b : i1
+    %r = arith.andi %o, %c : i1
+    return %r : i1
+  }
+}
+
+// CHECK-LABEL: AICORE bool mixed_bool(
+// CHECK: [[BOOL_X:v[0-9]+]] = (v1 & v2) & (v3 | v4);
+// CHECK: return [[BOOL_X]] & v5;
+// CHECK-NOT: (v1 & v2 & v3 | v4)
+
+// CHECK-LABEL: AICORE float subf_chain(
+// CHECK: float [[SUB_S:v[0-9]+]] = v2 - (v3 - v4);
+// CHECK: return v1 - [[SUB_S]];
+
+// CHECK-LABEL: AICORE bool or_left(
+// CHECK: return (v1 | v2) & v3;

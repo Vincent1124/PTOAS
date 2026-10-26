@@ -62,6 +62,159 @@ struct FormEmitCExpressionsCompatPass final
     return false;
   }
 
+  /// Precedence of an EmitC comparison. Equality binds looser than the
+  /// relational predicates in C++, so the predicate decides the level.
+  static std::optional<int> cmpOperatorPrecedence(emitc::CmpPredicate predicate) {
+    switch (predicate) {
+    case emitc::CmpPredicate::eq:
+    case emitc::CmpPredicate::ne:
+      return 8;
+    case emitc::CmpPredicate::lt:
+    case emitc::CmpPredicate::le:
+    case emitc::CmpPredicate::gt:
+    case emitc::CmpPredicate::ge:
+      return 9;
+    case emitc::CmpPredicate::three_way:
+      return 10;
+    }
+    return std::nullopt;
+  }
+
+  /// C++ operator precedence of the operator an EmitC op prints, mirroring
+  /// `getOperatorPrecedence` in
+  /// llvm-project/mlir/lib/Target/Cpp/TranslateToCpp.cpp (LLVM 19). Only the
+  /// relative order matters: a monotone renumbering keeps every comparison
+  /// below valid. `std::nullopt` means "unknown to this table"; callers must
+  /// then take the conservative path.
+  static std::optional<int> cppOperatorPrecedence(Operation *op) {
+    if (!op) {
+      return std::nullopt;
+    }
+    if (isa<emitc::ConditionalOp>(op)) {
+      return 2;
+    }
+    if (isa<emitc::LogicalOrOp>(op)) {
+      return 3;
+    }
+    if (isa<emitc::LogicalAndOp>(op)) {
+      return 4;
+    }
+    if (isa<emitc::BitwiseOrOp>(op)) {
+      return 5;
+    }
+    if (isa<emitc::BitwiseXorOp>(op)) {
+      return 6;
+    }
+    if (isa<emitc::BitwiseAndOp>(op)) {
+      return 7;
+    }
+    if (auto cmp = dyn_cast<emitc::CmpOp>(op)) {
+      return cmpOperatorPrecedence(cmp.getPredicate());
+    }
+    if (isa<emitc::BitwiseLeftShiftOp, emitc::BitwiseRightShiftOp>(op)) {
+      return 11;
+    }
+    if (isa<emitc::AddOp, emitc::SubOp>(op)) {
+      return 12;
+    }
+    if (isa<emitc::MulOp, emitc::DivOp, emitc::RemOp>(op)) {
+      return 13;
+    }
+    if (isa<emitc::UnaryMinusOp, emitc::UnaryPlusOp, emitc::LogicalNotOp,
+            emitc::BitwiseNotOp, emitc::CastOp, emitc::ApplyOp>(op)) {
+      return 15;
+    }
+    if (isa<emitc::CallOp, emitc::CallOpaqueOp>(op)) {
+      return 16;
+    }
+    return std::nullopt;
+  }
+
+  /// Whether inlining `producer` as an operand of `consumer` would hand the
+  /// LLVM 19 C++ emitter an expression it groups incorrectly.
+  ///
+  /// `CppEmitter::emitOperand` parenthesizes a sub-expression whose precedence
+  /// is <= the enclosing context (TranslateToCpp.cpp:1334), but then pushes the
+  /// *lowest* possible precedence for it (:1337) instead of its own. Everything
+  /// printed inside those parentheses therefore believes it binds tighter than
+  /// its parent and loses the parentheses it needs, so the emitted C++ silently
+  /// re-groups the tree:
+  ///
+  ///   ((a andi b) andi (c ori d)) andi e
+  ///     -> (v1 & v2 & v3 | v4) & v5      instead of
+  ///        (v1 & v2 & (v3 | v4)) & v5
+  ///
+  /// LLVM 21 fixed the emitter by pushing the operand's own precedence
+  /// unconditionally (:1536). We cannot patch the external LLVM build, so keep
+  /// such producers out of the merged expression body instead: a named value
+  /// needs no parentheses and the broken precedence path is never taken. The
+  /// temporaries are plain SSA values (not volatile), so the downstream C++
+  /// compiler still optimizes them.
+  static bool wouldLoseParentheses(emitc::ExpressionOp producer,
+                                   Operation &consumer) {
+    // Pre-existing guard for ternaries; also covers the case where the ternary
+    // is nested rather than being the producer root.
+    if (containsConditionalOperator(producer)) {
+      return true;
+    }
+
+    // Call operands are comma-delimited, not operator operands: the emitter
+    // pushes the lowest precedence for them in both versions, which is correct
+    // there, so nothing can be lost.
+    if (isa<emitc::CallOp, emitc::CallOpaqueOp>(&consumer)) {
+      return false;
+    }
+
+    std::optional<int> rootPrecedence =
+        cppOperatorPrecedence(producer.getRootOp());
+    std::optional<int> consumerPrecedence = cppOperatorPrecedence(&consumer);
+    if (!rootPrecedence || !consumerPrecedence) {
+      // Unknown operator: keep the merge from happening rather than guess.
+      return true;
+    }
+
+    // The emitter only parenthesizes the producer when its precedence does not
+    // exceed the consumer's; otherwise the precedence stack stays correct and
+    // the tree is printed faithfully.
+    if (*rootPrecedence > *consumerPrecedence) {
+      return false;
+    }
+
+    // Inside those parentheses the context degenerates to 0, so every direct
+    // operand of the producer root is printed without parentheses. If any of
+    // them is a body node that would have needed them, the merge must not
+    // happen. Deeper nodes are unaffected (their own context is the precedence
+    // of the node that consumes them) and were already checked when they were
+    // inlined one level down.
+    //
+    // An operand with *equal* precedence only needs parentheses when it is not
+    // the leftmost one: C++ is left-associative, so `(a + b) - c` prints as
+    // `a + b - c` with the same grouping, while `a - (b - c)` does not. Keeping
+    // left operands inline is what keeps ordinary `+`/`&` chains unchanged.
+    for (auto [index, operand] :
+         llvm::enumerate(producer.getRootOp()->getOperands())) {
+      Operation *definition = operand.getDefiningOp();
+      if (!definition) {
+        continue;  // block argument or constant
+      }
+      emitc::ExpressionOp parent =
+          definition->getParentOfType<emitc::ExpressionOp>();
+      if (!parent || parent.getOperation() != producer.getOperation()) {
+        continue;  // lives in a different expression
+      }
+      std::optional<int> operandPrecedence =
+          cppOperatorPrecedence(definition);
+      if (!operandPrecedence) {
+        return true;  // unknown operator inside the body
+      }
+      if (*operandPrecedence < *rootPrecedence ||
+          (*operandPrecedence == *rootPrecedence && index != 0)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   static bool foldExpression(emitc::ExpressionOp expression,
                              IRRewriter &rewriter) {
     bool changed = false;
@@ -85,7 +238,7 @@ struct FormEmitCExpressionsCompatPass final
           continue;
         }
 
-        if (containsConditionalOperator(producer)) {
+        if (wouldLoseParentheses(producer, op)) {
           producer.setDoNotInline(true);
           changed = true;
           continue;

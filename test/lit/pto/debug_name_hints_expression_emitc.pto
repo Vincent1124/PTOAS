@@ -9,6 +9,11 @@
 // Provenance comments should still preserve the collapsed intermediate names
 // on the surviving expression root instead of dropping them after
 // FormExpressions inlines the chain.
+//
+// The i32 cast sandwich PTOAS emits around every add means these chains take
+// the precedence-preserving temporary path instead of being merged into one
+// expression body (issue #1648: LLVM 19's CppEmitter re-groups nested casts),
+// so each intermediate keeps its own provenance comment.
 
 module {
   func.func @expression_textual_chain(%lhs: i32, %rhs: i32) -> i32 {
@@ -27,8 +32,12 @@ module {
 }
 
 // CHECK-LABEL: AICORE int32_t expression_textual_chain(
-// CHECK: // pto: %sum0, %sum1, %ret
-// CHECK-NEXT: return
+// CHECK: // pto: %sum0
+// CHECK: // pto: %sum1
+// CHECK: // pto: %ret
+// CHECK: return
 // CHECK-LABEL: AICORE int32_t expression_loc_chain(
-// CHECK: // pto: %x, %y, %z
-// CHECK-NEXT: return
+// CHECK: // pto: %x
+// CHECK: // pto: %y
+// CHECK: // pto: %z
+// CHECK: return
