@@ -262,6 +262,23 @@ static Value computeTileAddress(Value value, IRRewriter &rewriter,
   return {};
 }
 
+// A stride difference along a dimension the child window does not span is
+// immaterial: with a unit extent no element address ever uses that stride, so
+// a single-row (or single-column) window keeps contiguous addressing. This
+// only holds for the plain none_box layout family, whose element addresses
+// are base + row * rowStride + col * colStride; boxed layouts interleave
+// fractal blocks, so their block strides stay load-bearing in both dims.
+static bool windowStrideMatches(int64_t inheritedStride, int64_t childStride, int64_t childExtent,
+                                bool plainLayout)
+{
+    return inheritedStride == childStride || (plainLayout && childExtent == 1);
+}
+
+static bool isNoneBoxLayout(pto::TileBufType type)
+{
+    return static_cast<int32_t>(type.getConfigAttr().getSLayout().getValue()) == kSlayoutNoneBox;
+}
+
 static pto::TileBufType getSubviewPhysicalType(pto::SubViewOp op) {
   pto::TileBufType sourceType = op.getSource().getType();
   pto::TileBufType resultType = op.getResult().getType();
@@ -275,14 +292,17 @@ static pto::TileBufType getSubviewPhysicalType(pto::SubViewOp op) {
       op.getContext(), resultType.getShape(), resultType.getElementType(),
       resultType.getMemorySpace(), resultType.getValidShape(),
       resultType.getConfigAttr());
-  // If the child tile's compact layout has the same pointer stride as the
-  // inherited subview, the addressed handle can use the child physical shape.
-  // Otherwise keep the parent shape and express the logical slice via valid.
+  bool plainLayout = isNoneBoxLayout(sourceType);
+  // If the child tile's compact layout keeps the inherited addressing, the
+  // addressed handle can use the child physical shape. Otherwise keep the
+  // parent shape and express the logical slice via valid.
   if (getTilePointerStrides(sourceType, inheritedRowStride,
                             inheritedColStride) &&
       getTilePointerStrides(compactChildType, childRowStride, childColStride) &&
-      inheritedRowStride == childRowStride &&
-      inheritedColStride == childColStride) {
+      windowStrideMatches(inheritedRowStride, childRowStride,
+                          resultType.getShape()[kDim0], plainLayout) &&
+      windowStrideMatches(inheritedColStride, childColStride,
+                          resultType.getShape()[kDim1], plainLayout)) {
     physicalShape = resultType.getShape();
   }
 
