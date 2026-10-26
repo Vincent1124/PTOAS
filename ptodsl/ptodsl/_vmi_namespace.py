@@ -248,6 +248,48 @@ def _validate_vmi_vcvt_bf16x2_pair(source_type, result_type, *, context: str) ->
     return False
 
 
+# `rounding` tokens accepted per conversion direction. Mirrors the VMI
+# conversion contract (docs/isa/vmi-isa/06-convert.md) and the ptoas verifier
+# (lib/PTO/IR/VMI/VMICvt.cpp): FpToSi/FpToUi accept R/A/F/C/Z (F = floor,
+# C = ceil; H is not part of that contract), fp narrowing accepts R/A/H/Z, and
+# the packed bf16x2 -> f4x2 narrow accepts the full R/A/F/C/Z set.
+_VMI_FP_TO_INT_ROUNDING = ("R", "A", "F", "C", "Z")
+_VMI_FP_NARROW_ROUNDING = ("R", "A", "H", "Z")
+_VMI_PACKED_FP4_ROUNDING = ("R", "A", "F", "C", "Z")
+
+
+def _vmi_vcvt_rounding_modes(source_elem, result_elem, *, is_bf16x2_to_f4x2):
+    if is_bf16x2_to_f4x2:
+        return _VMI_PACKED_FP4_ROUNDING
+    if _is_vmi_float_element_type(source_elem) and not _is_vmi_float_element_type(
+        result_elem
+    ):
+        return _VMI_FP_TO_INT_ROUNDING
+    # FpNarrow (including the same-width bf16<->f16 forms) is the only other
+    # direction that accepts `rounding`. Other directions keep the historical
+    # set so the ptoas verifier still reports the misuse.
+    return _VMI_FP_NARROW_ROUNDING
+
+
+def _vmi_vcvt_requires_saturate(source_elem, result_elem):
+    """``requiresSat`` of the vcvt contract row for this element-type pair."""
+    src_bits = _type_bit_width(source_elem, context="pto.vmi.vcvt(..., saturate=...)")
+    dst_bits = _type_bit_width(result_elem, context="pto.vmi.vcvt(..., saturate=...)")
+    src_is_fp = _is_vmi_float_element_type(source_elem)
+    dst_is_fp = _is_vmi_float_element_type(result_elem)
+    if src_is_fp and not dst_is_fp:
+        # Of the FpToSi/FpToUi rows only f16 -> si32 widens into a 32-bit
+        # destination, and there the contract forbids `saturate` because no
+        # overflow is possible.
+        return not (F16Type.isinstance(source_elem) and dst_bits == 32)
+    if src_is_fp and dst_is_fp:
+        if src_bits > dst_bits:
+            return True
+        # Same-width fp-to-fp: only bf16 -> f16 saturates (f16 -> bf16 forbids it).
+        return BF16Type.isinstance(source_elem) and F16Type.isinstance(result_elem)
+    return src_bits > dst_bits
+
+
 def _normalize_vmi_vcvt_rounding(mode, *, context: str, allowed=None):
     token = mode
     if not isinstance(token, str):
@@ -255,7 +297,7 @@ def _normalize_vmi_vcvt_rounding(mode, *, context: str, allowed=None):
         if "." in token:
             token = token.rsplit(".", 1)[-1]
     normalized = token.strip().upper()
-    allowed_modes = set(allowed or {"R", "A", "H", "Z"})
+    allowed_modes = set(allowed or _VMI_FP_NARROW_ROUNDING)
     if normalized not in allowed_modes:
         expected = ", ".join(sorted(allowed_modes))
         raise ValueError(
@@ -297,7 +339,11 @@ def _normalize_vcvt_options(
         rounding = _normalize_vmi_vcvt_rounding(
             rounding,
             context=rounding_context,
-            allowed={"R", "A", "F", "Z", "C"} if is_bf16x2_to_f4x2 else None,
+            allowed=_vmi_vcvt_rounding_modes(
+                source_type.element_type,
+                result_type.element_type,
+                is_bf16x2_to_f4x2=is_bf16x2_to_f4x2,
+            ),
         )
     elif is_bf16x2_to_f4x2:
         rounding = "R"
@@ -312,12 +358,13 @@ def _normalize_vcvt_options(
             f"{context} does not support saturate for "
             "f4E1M2x2/f4E2M1x2 -> bf16x2 conversion"
         )
-    if saturate is None:
-        src_bits = _type_bit_width(source_type.element_type, context=context)
-        dst_bits = _type_bit_width(result_type.element_type, context=context)
-        src_is_fp = _is_vmi_float_element_type(source_type.element_type)
-        dst_is_fp = _is_vmi_float_element_type(result_type.element_type)
-        if not is_bf16x2_pair and (src_bits > dst_bits or (src_is_fp and not dst_is_fp)):
+    if saturate is None and not is_bf16x2_pair:
+        # Default only for contract rows that actually require saturation.
+        # f16 -> si32 widens into a 32-bit destination and the contract forbids
+        # `saturate` there, so it must stay absent.
+        if _vmi_vcvt_requires_saturate(
+            source_type.element_type, result_type.element_type
+        ):
             saturate = "SAT"
     return rounding, saturate
 
