@@ -1093,7 +1093,7 @@ pipe 实现，但 InsertSync 必须使用上面的分支 effects。
 | ODS | `PTOAttrs.td` 新增 `MxGroupAxis`；`PTOOps.td` 给 `TQuantMxOp` 加两个属性，给 `TMovOp` 增加 optional `grpAxis`；保留 `$fp` operand 名和生成 API |
 | IR / verifier | `PTO.cpp`：`TQuantMxOp::verify()` 按轴及 physical 契约分派；`TMovOp::verify()` 以 `classifyTMovForm(getFp())` 区分 `NoTileAux` / `Fp` / `XToZz`，后者进入 §7.2；`TQuantMxOp` 自定义 parser/printer 同步新属性 |
 | EmitC | `PTOToEmitC.cpp`：`PTOQuantMxToEmitC` 二分；扩展既有 `PTOMovToEmitC`，`getFp()` 为非-scaling tile 时生成三参数 X-to-ZZ `TMOV` |
-| CAPI | `include/pto-c/Dialect/PTO.h` + `lib/CAPI/Dialect/PTO.cpp`：新枚举的 C 入口（参照 `QuantScaleAlg` 现有写法） |
+| CAPI | `include/pto-c/Dialect/PTOCAPI.h` + `lib/CAPI/Dialect/PTO.cpp`：新枚举的 C 入口（参照 `QuantScaleAlg` 现有写法） |
 | Python binding | `lib/Bindings/Python/PTOModule.cpp` 暴露 `MxGroupAxis`；生成的 `TMovOp(..., fp=...)` keyword 保持不变，只追加 optional `grpAxis=`；不新增 op binding |
 | PTO-BC | 不新增 opcode。scaling `getFp()` 保持 legacy FP wire opcode；非-scaling `getFp()` 必须走 generic v0 兼容记录并保留 `grpAxis`，不能复用 legacy FP payload。`pto.tquant.mx` 在 v0 known-op 表中不存在，必须新增显式 generic compatibility shim，使其不依赖 `PTOBC_ALLOW_GENERIC` 就编码为 `kOpcodeGeneric`；不得伪造 known-op schema 或占用 `pto.tquant` 的 opcode |
 | TMov 消费者 | 审计 `PTORemoveIdentityTMov`、`PTOA5NormalizeTMov`、PlanMemory、InsertSync、InferMemScope 和所有 `getFp()` 使用点；保留 `getFp()` API，语义相关消费者统一调用 `classifyTMovForm(getFp())` |

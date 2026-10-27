@@ -24,7 +24,7 @@
 #include "mlir-c/BuiltinTypes.h"
 #include "mlir-c/IR.h"
 #include "mlir-c/Support.h"
-#include "pto-c/Dialect/PTO.h"
+#include "pto-c/Dialect/PTOCAPI.h"
 #include "pto-c/Dialect/PTOEnums.h"
 #include "PTO/Support/CodeConstants.h"
 #include "pybind11/stl.h"

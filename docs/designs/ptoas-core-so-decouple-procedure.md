@@ -27,7 +27,7 @@
   - `:170-172` `PTOASPythonCore` 已 include `lib/Bindings/Python`。
 - `lib/Bindings/Python/PTOModule.cpp`（1555 行）——待迁移到 `_core`。
 - `tools/ptoas/NativeModule.cpp`（207 行）——已在 `_core`，不动。
-- `include/pto-c/Dialect/PTO.h`（273 行）——C API 声明。
+- `include/pto-c/Dialect/PTOCAPI.h`（273 行）——C API 声明。
 - `lib/CAPI/Dialect/PTO.cpp`（930 行）——C API 实现。
 
 ### `PTOModule.cpp` 里仍走 C++ 直调的 7 处类型（需 C API 化）
@@ -48,7 +48,7 @@
 
 ### C API 导出面缺口（易漏，必须先补）
 
-`PTOModule.cpp` 现在编在 DSO 内部，`mlirPTO*` 符号内部解析即可，因此 `include/pto-c/Dialect/PTO.h` 的**早期声明块（`:27-89`）未标注 `MLIR_CAPI_EXPORTED`**：PtrType、Async*、HiF8 系列、AddressSpace、TensorView、PartitionTensorView、Tile。已核实 `PTOModule.cpp` **全部调用**了这些声明。解耦后这些符号必须跨 DSO 边界被 `_core` 解析；在 DSO 的 `hidden` 可见性下它们会被隐藏，导致 `_core` 链接时 undefined symbol。
+`PTOModule.cpp` 现在编在 DSO 内部，`mlirPTO*` 符号内部解析即可，因此 `include/pto-c/Dialect/PTOCAPI.h` 的**早期声明块（`:27-89`）未标注 `MLIR_CAPI_EXPORTED`**：PtrType、Async*、HiF8 系列、AddressSpace、TensorView、PartitionTensorView、Tile。已核实 `PTOModule.cpp` **全部调用**了这些声明。解耦后这些符号必须跨 DSO 边界被 `_core` 解析；在 DSO 的 `hidden` 可见性下它们会被隐藏，导致 `_core` 链接时 undefined symbol。
 
 （`:92` 起的 TileBufType/各 Attr 声明已带 `MLIR_CAPI_EXPORTED`，无需处理。）
 
@@ -58,7 +58,7 @@
 
 ### 步骤 1：给早期 C API 声明补 `MLIR_CAPI_EXPORTED`
 
-文件 `include/pto-c/Dialect/PTO.h`。给 `:27-89` 范围内所有函数声明加 `MLIR_CAPI_EXPORTED`（与 `:92` 起 TileBufType 块的写法一致）。覆盖：
+文件 `include/pto-c/Dialect/PTOCAPI.h`。给 `:27-89` 范围内所有函数声明加 `MLIR_CAPI_EXPORTED`（与 `:92` 起 TileBufType 块的写法一致）。覆盖：
 
 - PtrType：`:27-32`
 - Async session/event/prefetch：`:35-40`
@@ -186,7 +186,7 @@ int32_t        mlirPTOTileBufTypeGetSFractalSize(MlirType type);
 
 本次改动落在「C API + Python 绑定 + 构建」三层，须同步：
 
-- [ ] `include/pto-c/Dialect/PTO.h`：早期块补 `MLIR_CAPI_EXPORTED`；新增 35 声明。
+- [ ] `include/pto-c/Dialect/PTOCAPI.h`：早期块补 `MLIR_CAPI_EXPORTED`；新增 35 声明。
 - [ ] `lib/CAPI/Dialect/PTO.cpp`：新增 35 实现，上游 MLIR C++ 调用全封在此。
 - [ ] `lib/Bindings/Python/PTOModule.cpp`：7 处类型改走 C API，不再触碰上游 C++ 符号。
 - [ ] `tools/ptoas/CMakeLists.txt`：源文件迁移；DSO 去 pybind11、去 `-z undefs`、去 per-source rtti/exceptions；保留 hidden 可见性。

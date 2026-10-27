@@ -23,8 +23,8 @@
 // value-drift asserts), no exported C API signature uses these enum types, and
 // scoped enums avoid leaking the enumerator names into the enclosing namespace.
 //
-// CmpMode, Coalesce and MaskPattern are already mirrored in pto-c/Dialect/PTO.h
-// and are intentionally NOT redefined here.
+// CmpMode, Coalesce and MaskPattern are already mirrored in
+// pto-c/Dialect/PTOCAPI.h and are intentionally NOT redefined here.
 //
 //===----------------------------------------------------------------------===//
 

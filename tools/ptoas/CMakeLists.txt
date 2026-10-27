@@ -343,7 +343,7 @@ if(PTOAS_ENABLE_ONLINE_CORE_COMPILE)
   #    mlir_include/ (item 9), the SAME tree the pybind11 family uses -- there is
   #    no separate patched PybindAdaptors.h / minimal mlir-c list for _core.
   install(FILES
-      "${CMAKE_SOURCE_DIR}/include/pto-c/Dialect/PTO.h"
+      "${CMAKE_SOURCE_DIR}/include/pto-c/Dialect/PTOCAPI.h"
       "${CMAKE_SOURCE_DIR}/include/pto-c/Dialect/PTOEnums.h"
     DESTINATION "${_ptoas_online_dst}/repo_include/pto-c/Dialect"
     COMPONENT PTOAS_Python)

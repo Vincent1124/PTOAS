@@ -11,8 +11,8 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-#ifndef MLIR_C_DIALECT_PTO_H
-#define MLIR_C_DIALECT_PTO_H
+#ifndef MLIR_C_DIALECT_PTOCAPI_H
+#define MLIR_C_DIALECT_PTOCAPI_H
 
 #include "mlir-c/IR.h" 
 
@@ -395,4 +395,4 @@ MLIR_CAPI_EXPORTED MlirType mlirPTOGMTypeGet(
 }
 #endif
 
-#endif // MLIR_C_DIALECT_PTO_H
+#endif // MLIR_C_DIALECT_PTOCAPI_H
