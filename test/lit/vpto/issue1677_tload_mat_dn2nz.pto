@@ -1,0 +1,106 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+
+// #1677: DN uses logical [rows, cols], with rows contiguous in GM.
+// Check DMA operands and NZ block stride as well as template selection.
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --enable-tile-op-expand %s -o - | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @dn2nz_rank2(%src: !pto.ptr<f16>) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c64 = arith.constant 64 : index
+    %c80 = arith.constant 80 : index
+    %c128 = arith.constant 128 : index
+    %tv = pto.make_tensor_view %src, shape = [%c64, %c128], strides = [%c1, %c80] : !pto.tensor_view<?x?xf16>
+    %part = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c64, %c128] : !pto.tensor_view<?x?xf16> -> !pto.partition_tensor_view<64x128xf16>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.tload ins(%part : !pto.partition_tensor_view<64x128xf16>) outs(%dst : !pto.tile_buf<loc=mat, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.barrier #pto.pipe<PIPE_ALL>
+    return
+  }
+
+  func.func @dn2nz_rank5(%src: !pto.ptr<f16>) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c64 = arith.constant 64 : index
+    %c80 = arith.constant 80 : index
+    %c128 = arith.constant 128 : index
+    %c10240 = arith.constant 10240 : index
+    %tv = pto.make_tensor_view %src, shape = [%c1, %c1, %c1, %c64, %c128], strides = [%c10240, %c10240, %c10240, %c1, %c80] : !pto.tensor_view<?x?x?x?x?xf16>
+    %part = pto.partition_view %tv, offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c1, %c1, %c64, %c128] : !pto.tensor_view<?x?x?x?x?xf16> -> !pto.partition_tensor_view<1x1x1x64x128xf16>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.tload ins(%part : !pto.partition_tensor_view<1x1x1x64x128xf16>) outs(%dst : !pto.tile_buf<loc=mat, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.barrier #pto.pipe<PIPE_ALL>
+    return
+  }
+
+  func.func @dn2nz_padded(%src: !pto.ptr<f16>) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c63 = arith.constant 63 : index
+    %c80 = arith.constant 80 : index
+    %c127 = arith.constant 127 : index
+    %c10160 = arith.constant 10160 : index
+    %tv = pto.make_tensor_view %src, shape = [%c1, %c1, %c1, %c63, %c127], strides = [%c10160, %c10160, %c10160, %c1, %c80] : !pto.tensor_view<?x?x?x?x?xf16>
+    %part = pto.partition_view %tv, offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c1, %c1, %c63, %c127] : !pto.tensor_view<?x?x?x?x?xf16> -> !pto.partition_tensor_view<1x1x1x63x127xf16>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f16, rows=64, cols=128, v_row=63, v_col=127, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.tload ins(%part : !pto.partition_tensor_view<1x1x1x63x127xf16>) outs(%dst : !pto.tile_buf<loc=mat, dtype=f16, rows=64, cols=128, v_row=63, v_col=127, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.barrier #pto.pipe<PIPE_ALL>
+    return
+  }
+
+  func.func @dn2nz_valid_window(%src: !pto.ptr<f16>) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c64 = arith.constant 64 : index
+    %c80 = arith.constant 80 : index
+    %c128 = arith.constant 128 : index
+    %c10240 = arith.constant 10240 : index
+    %tv = pto.make_tensor_view %src, shape = [%c1, %c1, %c1, %c64, %c128], strides = [%c10240, %c10240, %c10240, %c1, %c80] : !pto.tensor_view<?x?x?x?x?xf16>
+    %part = pto.partition_view %tv, offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c1, %c1, %c64, %c128] : !pto.tensor_view<?x?x?x?x?xf16> -> !pto.partition_tensor_view<1x1x1x64x128xf16>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f16, rows=64, cols=128, v_row=51, v_col=123, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.tload ins(%part : !pto.partition_tensor_view<1x1x1x64x128xf16>) outs(%dst : !pto.tile_buf<loc=mat, dtype=f16, rows=64, cols=128, v_row=51, v_col=123, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.barrier #pto.pipe<PIPE_ALL>
+    return
+  }
+
+}
+
+// CHECK-LABEL: func.func @dn2nz_rank2(
+// CHECK-DAG: %[[ROWS_dn2nz_rank2:[a-zA-Z0-9_]+]] = arith.constant 64 : i64
+// CHECK-DAG: %[[COLS_dn2nz_rank2:[a-zA-Z0-9_]+]] = arith.constant 128 : i64
+// CHECK-DAG: %[[STRIDE_dn2nz_rank2:[a-zA-Z0-9_]+]] = arith.constant 160 : i64
+// CHECK-DAG: %[[NZ_dn2nz_rank2:[a-zA-Z0-9_]+]] = arith.constant 274877972481 : i64
+// CHECK: pto.set_mte2_nz_para %[[NZ_dn2nz_rank2]]
+// CHECK: pto.copy_gm_to_cbuf_multi_dn2nz {{.*}}, %[[STRIDE_dn2nz_rank2]], {{.*}}, %[[ROWS_dn2nz_rank2]], %[[COLS_dn2nz_rank2]],
+
+// CHECK-LABEL: func.func @dn2nz_rank5(
+// CHECK-DAG: %[[ROWS_dn2nz_rank5:[a-zA-Z0-9_]+]] = arith.constant 64 : i64
+// CHECK-DAG: %[[COLS_dn2nz_rank5:[a-zA-Z0-9_]+]] = arith.constant 128 : i64
+// CHECK-DAG: %[[STRIDE_dn2nz_rank5:[a-zA-Z0-9_]+]] = arith.constant 160 : i64
+// CHECK-DAG: %[[NZ_dn2nz_rank5:[a-zA-Z0-9_]+]] = arith.constant 274877972481 : i64
+// CHECK: pto.set_mte2_nz_para %[[NZ_dn2nz_rank5]]
+// CHECK: pto.copy_gm_to_cbuf_multi_dn2nz {{.*}}, %[[STRIDE_dn2nz_rank5]], {{.*}}, %[[ROWS_dn2nz_rank5]], %[[COLS_dn2nz_rank5]],
+
+// CHECK-LABEL: func.func @dn2nz_padded(
+// CHECK-DAG: %[[ROWS_dn2nz_padded:[a-zA-Z0-9_]+]] = arith.constant 63 : i64
+// CHECK-DAG: %[[COLS_dn2nz_padded:[a-zA-Z0-9_]+]] = arith.constant 127 : i64
+// CHECK-DAG: %[[STRIDE_dn2nz_padded:[a-zA-Z0-9_]+]] = arith.constant 160 : i64
+// CHECK-DAG: %[[NZ_dn2nz_padded:[a-zA-Z0-9_]+]] = arith.constant 274877972481 : i64
+// CHECK: pto.set_mte2_nz_para %[[NZ_dn2nz_padded]]
+// CHECK: pto.copy_gm_to_cbuf_multi_dn2nz {{.*}}, %[[STRIDE_dn2nz_padded]], {{.*}}, %[[ROWS_dn2nz_padded]], %[[COLS_dn2nz_padded]],
+
+// CHECK-LABEL: func.func @dn2nz_valid_window(
+// CHECK-DAG: %[[ROWS_dn2nz_valid_window:[a-zA-Z0-9_]+]] = arith.constant 64 : i64
+// CHECK-DAG: %[[COLS_dn2nz_valid_window:[a-zA-Z0-9_]+]] = arith.constant 123 : i64
+// CHECK-DAG: %[[STRIDE_dn2nz_valid_window:[a-zA-Z0-9_]+]] = arith.constant 160 : i64
+// CHECK-DAG: %[[NZ_dn2nz_valid_window:[a-zA-Z0-9_]+]] = arith.constant 274877972481 : i64
+// CHECK: pto.set_mte2_nz_para %[[NZ_dn2nz_valid_window]]
+// CHECK: pto.copy_gm_to_cbuf_multi_dn2nz {{.*}}, %[[STRIDE_dn2nz_valid_window]], {{.*}}, %[[ROWS_dn2nz_valid_window]], %[[COLS_dn2nz_valid_window]],

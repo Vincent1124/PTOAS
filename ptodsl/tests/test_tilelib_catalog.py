@@ -1418,9 +1418,9 @@ class TileLibCatalogTest(unittest.TestCase):
                 "template_tload_gm_to_mat_dn2nz",
                 {
                     "src": ViewSpec(
-                        shape=(1, 1, 1, 64, 8),
+                        shape=(1, 1, 1, 8, 64),
                         dtype=ScalarType("f16"),
-                        strides=(512, 512, 512, 1, 64),
+                        strides=(512, 512, 512, 1, 8),
                     ),
                     "dst": TileSpec(
                         shape=(8, 64),
@@ -1480,9 +1480,9 @@ class TileLibCatalogTest(unittest.TestCase):
             }
             dn2nz_specs = {
                 "src": ViewSpec(
-                    shape=(1, 1, 1, 64, 8),
+                    shape=(1, 1, 1, 8, 64),
                     dtype=ScalarType(dtype),
-                    strides=(512, 512, 512, 1, 64),
+                    strides=(512, 512, 512, 1, 8),
                 ),
                 "dst": TileSpec(
                     shape=(8, 64),

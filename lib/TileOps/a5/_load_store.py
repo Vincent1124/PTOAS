@@ -242,7 +242,19 @@ def tload_mat_nd2nz_constraint(src_kind, src_shape, src_strides, src_memory_spac
     )
 
 
-def tload_mat_dn2nz_constraint(src_kind, src_shape, src_strides, src_memory_space, dst_kind, dst_shape, dst_memory_space, dst_config, dst_dtype, **_):
+def tload_mat_dn2nz_constraint(
+    src_kind,
+    src_shape,
+    src_strides,
+    src_memory_space,
+    dst_kind,
+    dst_shape,
+    dst_valid_shape,
+    dst_memory_space,
+    dst_config,
+    dst_dtype,
+    **_,
+):
     if src_kind != "view" or dst_kind != "tile" or src_memory_space != "gm" or dst_memory_space != "mat":
         return False
     if dst_config.b_layout != "col_major" or dst_config.s_layout != "row_major":
@@ -251,10 +263,18 @@ def tload_mat_dn2nz_constraint(src_kind, src_shape, src_strides, src_memory_spac
         return False
     if _view_rank(src_shape) != 5:
         return False
-    # DN input is column-major in the logical matrix, so its row dimension is
-    # the contiguous view axis.
-    return _known_eq(src_shape[4], dst_shape[0]) and _known_eq(
-        _stride_at(src_strides, 3), 1
+    # DN keeps the logical [rows, cols] shape; strides make rows contiguous.
+    # This template emits one matrix, not a batch of matrices.
+    if any(dim != 1 for dim in src_shape[:3]):
+        return False
+    return _check_load_bounds(
+        src_shape,
+        src_strides,
+        dst_shape,
+        dst_valid_shape,
+        logical_rows=src_shape[3],
+        logical_cols=src_shape[4],
+        stride_axis=3,
     )
 
 

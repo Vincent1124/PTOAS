@@ -287,8 +287,11 @@ def template_tload_gm_to_mat_nd2nz(src: pto.PartitionTensorView, dst: pto.Tile):
 )
 def template_tload_gm_to_mat_dn2nz(src: pto.PartitionTensorView, dst: pto.Tile):
     m, k = dst.valid_shape
+    # Match PTO-ISA TLoadCubeND2NZ: DN changes source strides, not the
+    # logical row/column counts. NZ block placement uses physical tile rows.
+    rows = m if src.shape[3] is None else src.shape[3]
     elem_bytes = pto.bytewidth(dst.dtype)
-    src_inner_stride = m * elem_bytes
+    src_inner_stride = rows * elem_bytes
     if len(src.shape) == 5 and src.strides is not None and src.strides[4] is not None:
         src_inner_stride = src.strides[4] * elem_bytes
 
@@ -296,8 +299,8 @@ def template_tload_gm_to_mat_dn2nz(src: pto.PartitionTensorView, dst: pto.Tile):
         src.as_ptr(),
         dst.as_ptr(),
         "dn2nz",
-        shape=(k, m),
+        shape=(rows, k),
         src_layout=(src_inner_stride,),
-        dst_group=(1, 1, k, 0),
+        dst_group=(1, 1, dst.shape[0], 0),
         ctrl=(0, False),
     )
