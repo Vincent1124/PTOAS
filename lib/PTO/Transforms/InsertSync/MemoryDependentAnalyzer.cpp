@@ -307,11 +307,132 @@ bool MemoryDependentAnalyzer::isGMBufferOverlap(const BaseMemInfo *a,
     return isBufferAddressRangeOverlap(a, b);
   }
 
+  // Window offsets are relative to the root, so they are only comparable on a
+  // shared root. A proof here is the only way the interleaved column slices of
+  // one tensor are seen as independent: their flat ranges always overlap, and
+  // the allocateSize == 0 short circuit below would answer "overlap" anyway for
+  // a bare !pto.ptr kernel argument, whose byte size is never modelled.
+  if (isGMWindowProvenDisjoint(a, b)) {
+    return false;
+  }
+
   if (a->allocateSize == 0 || b->allocateSize == 0) {
     return true;
   }
 
   return isBufferAddressRangeOverlap(a, b);
+}
+
+// Inflates a window's contiguous run to whole access granules. Sound only when
+// the strides are granule multiples, which the caller checks: otherwise an
+// inflated run could reach into a neighbouring run of the same window and the
+// per-run reasoning below would no longer describe the access.
+static GMWindow inflateToGranule(const GMWindow &window) {
+  constexpr uint64_t granule = kGmAccessGranuleBytes;
+  GMWindow inflated = window;
+  uint64_t end = window.byteOffset + window.contigBytes;
+  inflated.byteOffset = window.byteOffset / granule * granule;
+  inflated.contigBytes =
+      (end + granule - 1) / granule * granule - inflated.byteOffset;
+  return inflated;
+}
+
+// (b) of isGMWindowProvenDisjoint: same lattice of run starts, and the two
+// runs never meet inside one period. This is the column-slice case, where the
+// bounding-interval check (a) can never succeed.
+//
+// With identical outerDims the run starts are offA + L and offB + L for a
+// common lattice L. Let d0 = (offA - offB) mod S for the innermost stride S.
+// A byte of window A at intra-run position i (0 <= i < contigA) and a byte of
+// window B at position j (0 <= j < contigB) collide iff their run-start
+// difference plus i - j is a multiple of S, i.e. iff some t with
+// -(contigB - 1) <= t <= contigA - 1 satisfies d0 + t = 0 (mod S). The set of
+// achievable -t mod S is {0 .. contigB - 1} ∪ {S - contigA + 1 .. S - 1}, so
+// the windows are disjoint iff contigB <= d0 <= S - contigA. Requiring
+// contigA + contigB <= S keeps both sides of that interval from overlapping,
+// and it also follows from the caller's granule-alignment precondition that
+// the inflated runs stay inside one period.
+static bool gmWindowRunsNeverMeet(const GMWindow &windowA,
+                                  const GMWindow &windowB) {
+  if (windowA.outerDims != windowB.outerDims || windowA.outerDims.empty()) {
+    return false;
+  }
+  uint64_t innerStride = windowA.outerDims.back().first;
+  if (innerStride == 0) {
+    return false;
+  }
+  if (llvm::any_of(windowA.outerDims, [&](std::pair<uint64_t, uint64_t> dim) {
+        return dim.first % innerStride != 0;
+      })) {
+    return false;
+  }
+  if (windowA.contigBytes + windowB.contigBytes > innerStride) {
+    return false;
+  }
+
+  uint64_t startDelta = (windowA.byteOffset % innerStride + innerStride -
+                         windowB.byteOffset % innerStride) %
+                        innerStride;
+  // Disjoint iff B's first run starts at or after A's run end (d0 >= contigB)
+  // and A's first run starts at or after B's run end of the previous period
+  // (d0 <= innerStride - contigA). A narrower window nested inside a wider one
+  // fails one of the two, exactly as it must.
+  if (startDelta < windowB.contigBytes ||
+      startDelta > innerStride - windowA.contigBytes) {
+    return false;
+  }
+
+  if (isTraceEnabled()) {
+    llvm::errs() << "    -> GM windows disjoint: runs of "
+                 << windowA.contigBytes << "B and " << windowB.contigBytes
+                 << "B at start delta " << startDelta << " of stride "
+                 << innerStride << "\n";
+  }
+  return true;
+}
+
+bool MemoryDependentAnalyzer::isGMWindowProvenDisjoint(
+    const BaseMemInfo *a, const BaseMemInfo *b) const {
+  if (!a->gmWindow || !b->gmWindow) {
+    return false;
+  }
+  const GMWindow &rawA = *a->gmWindow;
+  const GMWindow &rawB = *b->gmWindow;
+  if (rawA.contigBytes == 0 || rawB.contigBytes == 0) {
+    return false;
+  }
+
+  // Every stride must be a granule multiple, both so inflating a run cannot
+  // spill into the next one and so the lattice of run starts stays
+  // granule-aligned.
+  auto stridesAreGranuleAligned = [](const GMWindow &window) {
+    return llvm::all_of(window.outerDims, [](std::pair<uint64_t, uint64_t> dim) {
+      return dim.first != 0 && dim.first % kGmAccessGranuleBytes == 0;
+    });
+  };
+  if (!stridesAreGranuleAligned(rawA) || !stridesAreGranuleAligned(rawB)) {
+    return false;
+  }
+
+  const GMWindow windowA = inflateToGranule(rawA);
+  const GMWindow windowB = inflateToGranule(rawB);
+
+  // (a) Bounding intervals do not meet. Covers the common row-block tiling,
+  // where two views take different row ranges of the same tensor.
+  uint64_t endA = windowA.byteOffset + windowA.spanBytes();
+  uint64_t endB = windowB.byteOffset + windowB.spanBytes();
+  if (endA <= windowB.byteOffset || endB <= windowA.byteOffset) {
+    if (isTraceEnabled()) {
+      llvm::errs() << "    -> GM windows disjoint: bounding ranges ["
+                   << windowA.byteOffset << ", " << endA << ") vs ["
+                   << windowB.byteOffset << ", " << endB << ")\n";
+    }
+    return true;
+  }
+
+  // (b) Same lattice of run starts, and the two runs never meet inside one
+  // period. This is the column-slice case, where (a) can never succeed.
+  return gmWindowRunsNeverMeet(windowA, windowB);
 }
  
 bool MemoryDependentAnalyzer::isBufferAddressRangeOverlap(

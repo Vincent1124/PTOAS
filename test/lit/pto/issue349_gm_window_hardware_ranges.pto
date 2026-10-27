@@ -1,0 +1,71 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software; you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR
+// NON-INFRINGEMENT. See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-level=level3 --enable-insert-sync %s | FileCheck %s
+
+module {
+  // The offset moves the second transfer from the left view to the right
+  // half. The view windows are disjoint, but the actual TLOAD reads the bytes
+  // written by the preceding TSTORE, so the synchronization must survive.
+  func.func @gm_window_tload_offset(%o: !pto.ptr<f32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %offset = arith.constant 512 : i64
+    %addr0 = arith.constant 0 : i64
+    %addr32k = arith.constant 32768 : i64
+    %view = pto.make_tensor_view %o, shape = [%c64, %c256], strides = [%c256, %c1]
+      : !pto.tensor_view<?x?xf32>
+    %right = pto.partition_view %view, offsets = [%c0, %c128], sizes = [%c64, %c128]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x128xf32>
+    %left = pto.partition_view %view, offsets = [%c0, %c0], sizes = [%c64, %c128]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x128xf32>
+    %src = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile addr = %addr32k : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tstore ins(%src : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%right : !pto.partition_tensor_view<64x128xf32>)
+    pto.tload ins(%left : !pto.partition_tensor_view<64x128xf32>) outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {cache_policy = #pto.load_cache_policy<l2_bypass>} offset = %offset : i64
+    return
+  }
+
+  // A5 allows a single-column tile whose physical layout does not match the
+  // logical ND view. TStoreVecDN then emits one contiguous burst, so two
+  // apparently disjoint column windows overlap in hardware.
+  func.func @gm_window_single_column_layout_mismatch(%o: !pto.ptr<f32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c64 = arith.constant 64 : index
+    %c256 = arith.constant 256 : index
+    %addr0 = arith.constant 0 : i64
+    %addr16k = arith.constant 16384 : i64
+    %view = pto.make_tensor_view %o, shape = [%c64, %c256], strides = [%c256, %c1]
+      : !pto.tensor_view<?x?xf32>
+    %left = pto.partition_view %view, offsets = [%c0, %c0], sizes = [%c64, %c1]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x1xf32>
+    %shifted = pto.partition_view %view, offsets = [%c0, %c32], sizes = [%c64, %c1]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x1xf32>
+    %first = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=1, v_row=64, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    %second = pto.alloc_tile addr = %addr16k : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=1, v_row=64, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    pto.tstore ins(%first : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=1, v_row=64, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%left : !pto.partition_tensor_view<64x1xf32>)
+    pto.tstore ins(%second : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=1, v_row=64, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%shifted : !pto.partition_tensor_view<64x1xf32>)
+    return
+  }
+}
+
+// CHECK-LABEL: AICORE void gm_window_tload_offset(
+// CHECK:       TSTORE(
+// CHECK:       set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
+// CHECK-NEXT:  wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
+// CHECK:       TLOAD(
+
+// CHECK-LABEL: AICORE void gm_window_single_column_layout_mismatch(
+// CHECK:       TSTORE(
+// CHECK:       pipe_barrier(PIPE_MTE3);
+// CHECK-NEXT:  TSTORE(

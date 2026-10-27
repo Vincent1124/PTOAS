@@ -1,0 +1,380 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a3 --pto-level=level3 --enable-insert-sync %s | FileCheck %s
+
+// issue #1624: two fixpipe writebacks into disjoint column slices of the same
+// GM root got a redundant pipe_barrier(PIPE_FIX) between them, because a
+// BaseMemInfo described an access as one flat [base, base + size) interval.
+// Column slices interleave, so their flat intervals always overlap even when no
+// byte is shared. PTOIRTranslator now records the strided GMWindow the view
+// chain selects, and MemoryDependentAnalyzer proves disjointness from it.
+//
+// Every function below runs the same matmul chain and differs only in the two
+// output views, so the pipe_barrier(PIPE_FIX) between the two TSTOREs is the
+// only thing under test. Disjointness is proven at 64-byte granularity
+// (FIXP_BURST_UNIT_LEN), so a logically-disjoint but unaligned pair stays
+// conservative.
+
+module {
+  // Columns [0, 128) and [128, 256) of a 64x256 tensor: rows are 1024 bytes
+  // apart and each slice is a 512-byte run, so no byte is ever shared.
+  func.func @gm_window_disjoint_columns(%a: !pto.ptr<bf16>, %b: !pto.ptr<bf16>, %o: !pto.ptr<f32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %addr0 = arith.constant 0 : i64
+    %addr16k = arith.constant 16384 : i64
+    %addr32k = arith.constant 32768 : i64
+    %tva = pto.make_tensor_view %a, shape = [%c64, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xbf16>
+    %va = pto.partition_view %tva, offsets = [%c0, %c0], sizes = [%c64, %c128] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<64x128xbf16>
+    %tvb = pto.make_tensor_view %b, shape = [%c128, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xbf16>
+    %vb = pto.partition_view %tvb, offsets = [%c0, %c0], sizes = [%c128, %c128] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<128x128xbf16>
+    %tvo = pto.make_tensor_view %o, shape = [%c64, %c256], strides = [%c256, %c1] : !pto.tensor_view<?x?xf32>
+    %vo0 = pto.partition_view %tvo, offsets = [%c0, %c0], sizes = [%c64, %c128] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x128xf32>
+    %vo1 = pto.partition_view %tvo, offsets = [%c0, %c128], sizes = [%c64, %c128] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x128xf32>
+    %am = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %bm = pto.alloc_tile addr = %addr16k : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %al = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %br = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %cfirst = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    %csecond = pto.alloc_tile addr = %addr32k : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    pto.tload ins(%va : !pto.partition_tensor_view<64x128xbf16>) outs(%am : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tload ins(%vb : !pto.partition_tensor_view<128x128xbf16>) outs(%bm : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tmov ins(%am : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%al : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tmov ins(%bm : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%br : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tmatmul ins(%al, %br : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%cfirst : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+    pto.tstore ins(%cfirst : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) outs(%vo0 : !pto.partition_tensor_view<64x128xf32>)
+    pto.tmatmul ins(%al, %br : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%csecond : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+    pto.tstore ins(%csecond : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) outs(%vo1 : !pto.partition_tensor_view<64x128xf32>)
+    return
+  }
+
+  // Same proof through a nested partition_view: the inner window is composed
+  // onto the outer one, not rebuilt from the root.
+  func.func @gm_window_disjoint_columns_nested(%a: !pto.ptr<bf16>, %b: !pto.ptr<bf16>, %o: !pto.ptr<f32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %addr0 = arith.constant 0 : i64
+    %addr16k = arith.constant 16384 : i64
+    %addr32k = arith.constant 32768 : i64
+    %tva = pto.make_tensor_view %a, shape = [%c64, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xbf16>
+    %va = pto.partition_view %tva, offsets = [%c0, %c0], sizes = [%c64, %c128] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<64x128xbf16>
+    %tvb = pto.make_tensor_view %b, shape = [%c128, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xbf16>
+    %vb = pto.partition_view %tvb, offsets = [%c0, %c0], sizes = [%c128, %c128] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<128x128xbf16>
+    %tvo = pto.make_tensor_view %o, shape = [%c64, %c256], strides = [%c256, %c1] : !pto.tensor_view<?x?xf32>
+    %whole = pto.partition_view %tvo, offsets = [%c0, %c0], sizes = [%c64, %c256] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x256xf32>
+    %vo0 = pto.partition_view %whole, offsets = [%c0, %c0], sizes = [%c64, %c128] : !pto.partition_tensor_view<64x256xf32> -> !pto.partition_tensor_view<64x128xf32>
+    %vo1 = pto.partition_view %whole, offsets = [%c0, %c128], sizes = [%c64, %c128] : !pto.partition_tensor_view<64x256xf32> -> !pto.partition_tensor_view<64x128xf32>
+    %am = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %bm = pto.alloc_tile addr = %addr16k : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %al = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %br = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %cfirst = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    %csecond = pto.alloc_tile addr = %addr32k : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    pto.tload ins(%va : !pto.partition_tensor_view<64x128xbf16>) outs(%am : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tload ins(%vb : !pto.partition_tensor_view<128x128xbf16>) outs(%bm : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tmov ins(%am : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%al : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tmov ins(%bm : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%br : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tmatmul ins(%al, %br : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%cfirst : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+    pto.tstore ins(%cfirst : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) outs(%vo0 : !pto.partition_tensor_view<64x128xf32>)
+    pto.tmatmul ins(%al, %br : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%csecond : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+    pto.tstore ins(%csecond : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) outs(%vo1 : !pto.partition_tensor_view<64x128xf32>)
+    return
+  }
+
+  // Both stores target the same columns, so the WAW is real and the barrier
+  // must survive.
+  func.func @gm_window_same_columns(%a: !pto.ptr<bf16>, %b: !pto.ptr<bf16>, %o: !pto.ptr<f32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %addr0 = arith.constant 0 : i64
+    %addr16k = arith.constant 16384 : i64
+    %addr32k = arith.constant 32768 : i64
+    %tva = pto.make_tensor_view %a, shape = [%c64, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xbf16>
+    %va = pto.partition_view %tva, offsets = [%c0, %c0], sizes = [%c64, %c128] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<64x128xbf16>
+    %tvb = pto.make_tensor_view %b, shape = [%c128, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xbf16>
+    %vb = pto.partition_view %tvb, offsets = [%c0, %c0], sizes = [%c128, %c128] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<128x128xbf16>
+    %tvo = pto.make_tensor_view %o, shape = [%c64, %c256], strides = [%c256, %c1] : !pto.tensor_view<?x?xf32>
+    %vo0 = pto.partition_view %tvo, offsets = [%c0, %c0], sizes = [%c64, %c128] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x128xf32>
+    %vo1 = pto.partition_view %tvo, offsets = [%c0, %c0], sizes = [%c64, %c128] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x128xf32>
+    %am = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %bm = pto.alloc_tile addr = %addr16k : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %al = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %br = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %cfirst = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    %csecond = pto.alloc_tile addr = %addr32k : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    pto.tload ins(%va : !pto.partition_tensor_view<64x128xbf16>) outs(%am : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tload ins(%vb : !pto.partition_tensor_view<128x128xbf16>) outs(%bm : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tmov ins(%am : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%al : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tmov ins(%bm : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%br : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tmatmul ins(%al, %br : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%cfirst : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+    pto.tstore ins(%cfirst : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) outs(%vo0 : !pto.partition_tensor_view<64x128xf32>)
+    pto.tmatmul ins(%al, %br : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%csecond : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+    pto.tstore ins(%csecond : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) outs(%vo1 : !pto.partition_tensor_view<64x128xf32>)
+    return
+  }
+
+  // MSCATTER addresses its GM table densely from the base pointer (elem mode:
+  // tablePtr + idx; row mode: table + idx * validCols) and ignores the GM row
+  // stride, so the [0,128) window does NOT bound what its indices can touch:
+  // an index can land inside the [128,256) slice the TSTORE wrote. The window
+  // proof must not fire across an mscatter, and the sync must survive.
+  func.func @gm_window_tstore_mscatter(%a: !pto.ptr<bf16>, %b: !pto.ptr<bf16>, %o: !pto.ptr<f32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %addr0 = arith.constant 0 : i64
+    %addr16k = arith.constant 16384 : i64
+    %addr32k = arith.constant 32768 : i64
+    %tva = pto.make_tensor_view %a, shape = [%c64, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xbf16>
+    %va = pto.partition_view %tva, offsets = [%c0, %c0], sizes = [%c64, %c128] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<64x128xbf16>
+    %tvb = pto.make_tensor_view %b, shape = [%c128, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xbf16>
+    %vb = pto.partition_view %tvb, offsets = [%c0, %c0], sizes = [%c128, %c128] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<128x128xbf16>
+    %tvo = pto.make_tensor_view %o, shape = [%c64, %c256], strides = [%c256, %c1] : !pto.tensor_view<?x?xf32>
+    %vo0 = pto.partition_view %tvo, offsets = [%c0, %c0], sizes = [%c64, %c128] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x128xf32>
+    %vo1 = pto.partition_view %tvo, offsets = [%c0, %c128], sizes = [%c64, %c128] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x128xf32>
+    %am = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %bm = pto.alloc_tile addr = %addr16k : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %al = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %br = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %acc = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    %src = pto.alloc_tile addr = %addr32k : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=32, v_row=8, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %idx = pto.alloc_tile addr = %addr32k : !pto.tile_buf<loc=vec, dtype=i32, rows=8, cols=32, v_row=8, v_col=1, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tload ins(%va : !pto.partition_tensor_view<64x128xbf16>) outs(%am : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tload ins(%vb : !pto.partition_tensor_view<128x128xbf16>) outs(%bm : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tmov ins(%am : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%al : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tmov ins(%bm : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%br : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tmatmul ins(%al, %br : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%acc : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+    pto.tstore ins(%acc : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) outs(%vo1 : !pto.partition_tensor_view<64x128xf32>)
+    pto.mscatter ins(%src, %idx : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=32, v_row=8, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i32, rows=8, cols=32, v_row=8, v_col=1, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                 outs(%vo0 : !pto.partition_tensor_view<64x128xf32>)
+    return
+  }
+
+  // A narrow window nested inside a wider one: the second store covers columns
+  // [64,128) while the first covers [0,256). Every nested byte collides, but a
+  // wrong residue comparison (r < contigA || r > S - contigB) declares the pair
+  // disjoint because it only excludes neighbours inside one period. The
+  // corrected direction test (d0 >= contigB && d0 <= S - contigA) keeps the
+  // sync.
+  func.func @gm_window_nested_narrow(%c: !pto.ptr<f32>, %o: !pto.ptr<f32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c16 = arith.constant 16 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %addr0 = arith.constant 0 : i64
+    %addr32k = arith.constant 32768 : i64
+    %tvc = pto.make_tensor_view %c, shape = [%c64, %c256], strides = [%c256, %c1] : !pto.tensor_view<?x?xf32>
+    %vc_src = pto.partition_view %tvc, offsets = [%c0, %c0], sizes = [%c64, %c128] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x128xf32>
+    %tvo = pto.make_tensor_view %o, shape = [%c64, %c256], strides = [%c256, %c1] : !pto.tensor_view<?x?xf32>
+    %vo_wide = pto.partition_view %tvo, offsets = [%c0, %c0], sizes = [%c64, %c128] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x128xf32>
+    %vo_narrow = pto.partition_view %tvo, offsets = [%c0, %c32], sizes = [%c64, %c16] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x16xf32>
+    %src = pto.alloc_tile addr = %addr32k : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %narrow = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=16, v_row=64, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tload ins(%vc_src : !pto.partition_tensor_view<64x128xf32>) outs(%src : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tstore ins(%src : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%vo_wide : !pto.partition_tensor_view<64x128xf32>)
+    pto.tstore ins(%narrow : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=16, v_row=64, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%vo_narrow : !pto.partition_tensor_view<64x16xf32>)
+    return
+  }
+
+  // The same 64x256 output, but the narrow slice is reached through a shifted
+  // pointer: %oshift = %o + 256 bytes (64 f32 elements) and the view built on
+  // it covers columns [0,128) of that shifted base, i.e. bytes [256,768) of
+  // the real root. A window seeded from the shifted base would look disjoint
+  // from the [0,512) view; the make_tensor_view seed drops the window when the
+  // pointer is not the root itself (pto.addptr in between), so the sync must
+  // survive.
+  func.func @gm_window_shifted_base(%a: !pto.ptr<bf16>, %b: !pto.ptr<bf16>, %o: !pto.ptr<f32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %e64 = arith.constant 64 : index
+    %addr0 = arith.constant 0 : i64
+    %addr16k = arith.constant 16384 : i64
+    %addr32k = arith.constant 32768 : i64
+    %tva = pto.make_tensor_view %a, shape = [%c64, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xbf16>
+    %va = pto.partition_view %tva, offsets = [%c0, %c0], sizes = [%c64, %c128] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<64x128xbf16>
+    %tvb = pto.make_tensor_view %b, shape = [%c128, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xbf16>
+    %vb = pto.partition_view %tvb, offsets = [%c0, %c0], sizes = [%c128, %c128] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<128x128xbf16>
+    %oshift = pto.addptr %o, %e64 : !pto.ptr<f32> -> !pto.ptr<f32>
+    %tvo = pto.make_tensor_view %o, shape = [%c64, %c256], strides = [%c256, %c1] : !pto.tensor_view<?x?xf32>
+    %vo0 = pto.partition_view %tvo, offsets = [%c0, %c0], sizes = [%c64, %c128] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x128xf32>
+    %tvo1 = pto.make_tensor_view %oshift, shape = [%c64, %c256], strides = [%c256, %c1] : !pto.tensor_view<?x?xf32>
+    %vo1 = pto.partition_view %tvo1, offsets = [%c0, %c0], sizes = [%c64, %c128] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x128xf32>
+    %am = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %bm = pto.alloc_tile addr = %addr16k : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %al = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %br = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %cfirst = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    %csecond = pto.alloc_tile addr = %addr32k : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    pto.tload ins(%va : !pto.partition_tensor_view<64x128xbf16>) outs(%am : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tload ins(%vb : !pto.partition_tensor_view<128x128xbf16>) outs(%bm : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tmov ins(%am : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%al : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tmov ins(%bm : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%br : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tmatmul ins(%al, %br : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%cfirst : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+    pto.tstore ins(%cfirst : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) outs(%vo0 : !pto.partition_tensor_view<64x128xf32>)
+    pto.tmatmul ins(%al, %br : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%csecond : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+    pto.tstore ins(%csecond : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) outs(%vo1 : !pto.partition_tensor_view<64x128xf32>)
+    return
+  }
+
+  // Columns [1, 129) and [129, 257) of a 64x384 tensor. The byte ranges are
+  // adjacent and share nothing, but they start 4 bytes into a 64-byte fixpipe
+  // burst, so the proof must fail and the barrier must survive.
+  func.func @gm_window_unaligned_columns(%a: !pto.ptr<bf16>, %b: !pto.ptr<bf16>, %o: !pto.ptr<f32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %c129 = arith.constant 129 : index
+    %c384 = arith.constant 384 : index
+    %addr0 = arith.constant 0 : i64
+    %addr16k = arith.constant 16384 : i64
+    %addr32k = arith.constant 32768 : i64
+    %tva = pto.make_tensor_view %a, shape = [%c64, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xbf16>
+    %va = pto.partition_view %tva, offsets = [%c0, %c0], sizes = [%c64, %c128] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<64x128xbf16>
+    %tvb = pto.make_tensor_view %b, shape = [%c128, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xbf16>
+    %vb = pto.partition_view %tvb, offsets = [%c0, %c0], sizes = [%c128, %c128] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<128x128xbf16>
+    %tvo = pto.make_tensor_view %o, shape = [%c64, %c384], strides = [%c384, %c1] : !pto.tensor_view<?x?xf32>
+    %vo0 = pto.partition_view %tvo, offsets = [%c0, %c1], sizes = [%c64, %c128] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x128xf32>
+    %vo1 = pto.partition_view %tvo, offsets = [%c0, %c129], sizes = [%c64, %c128] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x128xf32>
+    %am = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %bm = pto.alloc_tile addr = %addr16k : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %al = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %br = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %cfirst = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    %csecond = pto.alloc_tile addr = %addr32k : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    pto.tload ins(%va : !pto.partition_tensor_view<64x128xbf16>) outs(%am : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tload ins(%vb : !pto.partition_tensor_view<128x128xbf16>) outs(%bm : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tmov ins(%am : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%al : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tmov ins(%bm : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%br : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tmatmul ins(%al, %br : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%cfirst : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+    pto.tstore ins(%cfirst : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) outs(%vo0 : !pto.partition_tensor_view<64x128xf32>)
+    pto.tmatmul ins(%al, %br : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%csecond : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+    pto.tstore ins(%csecond : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) outs(%vo1 : !pto.partition_tensor_view<64x128xf32>)
+    return
+  }
+
+  // The loop-carried view is the left half on the first trip and the right half
+  // on every later one, so a window captured from the init value would prove a
+  // disjointness that does not hold. No GMWindow may cross a loop boundary.
+  //
+  // NOTE(#1670): this case cannot run through the EmitC pipeline yet — an
+  // scf.for iter_args value typed !pto.partition_tensor_view leaves an
+  // unrealized_conversion_cast that PTOToEmitC cannot lower (same family as
+  // issue #1165). The GMWindow loop-boundary clearing it guards is exercised
+  // in unit-level sync analyses; re-enable here once the cast is supported.
+  // func.func @gm_window_loop_carried(%a: !pto.ptr<bf16>, %b: !pto.ptr<bf16>, %o: !pto.ptr<f32>) {
+//     %c0 = arith.constant 0 : index
+//     %c1 = arith.constant 1 : index
+//     %c2 = arith.constant 2 : index
+//     %c64 = arith.constant 64 : index
+//     %c128 = arith.constant 128 : index
+//     %c256 = arith.constant 256 : index
+//     %addr0 = arith.constant 0 : i64
+//     %addr16k = arith.constant 16384 : i64
+//     %addr32k = arith.constant 32768 : i64
+//     %tva = pto.make_tensor_view %a, shape = [%c64, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xbf16>
+//     %va = pto.partition_view %tva, offsets = [%c0, %c0], sizes = [%c64, %c128] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<64x128xbf16>
+//     %tvb = pto.make_tensor_view %b, shape = [%c128, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xbf16>
+//     %vb = pto.partition_view %tvb, offsets = [%c0, %c0], sizes = [%c128, %c128] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<128x128xbf16>
+//     %tvo = pto.make_tensor_view %o, shape = [%c64, %c256], strides = [%c256, %c1] : !pto.tensor_view<?x?xf32>
+//     %vo0 = pto.partition_view %tvo, offsets = [%c0, %c0], sizes = [%c64, %c128] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x128xf32>
+//     %vo1 = pto.partition_view %tvo, offsets = [%c0, %c128], sizes = [%c64, %c128] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x128xf32>
+//     %am = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+//     %bm = pto.alloc_tile addr = %addr16k : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+//     %al = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+//     %br = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+//     %cfirst = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+//     %csecond = pto.alloc_tile addr = %addr32k : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+//     pto.tload ins(%va : !pto.partition_tensor_view<64x128xbf16>) outs(%am : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+//     pto.tload ins(%vb : !pto.partition_tensor_view<128x128xbf16>) outs(%bm : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+//     pto.tmov ins(%am : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%al : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+//     pto.tmov ins(%bm : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%br : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+//     %carried = scf.for %i = %c0 to %c2 step %c1 iter_args(%dst = %vo0) -> (!pto.partition_tensor_view<64x128xf32>) {
+//       pto.tmatmul ins(%al, %br : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%cfirst : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+//       pto.tstore ins(%cfirst : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) outs(%dst : !pto.partition_tensor_view<64x128xf32>)
+//       pto.tmatmul ins(%al, %br : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%csecond : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+//       pto.tstore ins(%csecond : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=64, v_col=128, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) outs(%vo1 : !pto.partition_tensor_view<64x128xf32>)
+//       scf.yield %vo1 : !pto.partition_tensor_view<64x128xf32>
+//     }
+//     return
+//   }
+}
+
+// Disjoint column slices: nothing separates the two writebacks on PIPE_FIX.
+// CHECK-LABEL: AICORE void gm_window_disjoint_columns(
+// CHECK:       TSTORE(
+// CHECK-NOT:   pipe_barrier(PIPE_FIX);
+// CHECK:       TSTORE(
+
+// CHECK-LABEL: AICORE void gm_window_disjoint_columns_nested(
+// CHECK:       TSTORE(
+// CHECK-NOT:   pipe_barrier(PIPE_FIX);
+// CHECK:       TSTORE(
+
+// Identical slices: the WAW is real.
+// CHECK-LABEL: AICORE void gm_window_same_columns(
+// CHECK:       TSTORE(
+// CHECK:       pipe_barrier(PIPE_FIX);
+// CHECK-NEXT:  TSTORE(
+
+// MSCATTER ignores the view strides, so the window proof must not fire and a
+// real sync must separate the two writes. The set_flag lands in the cube
+// section and the wait_flag in the vector one, so no CHECK-NEXT here.
+// CHECK-LABEL: AICORE void gm_window_tstore_mscatter(
+// CHECK:       TSTORE(
+// CHECK:       set_flag(PIPE_FIX, PIPE_MTE3, EVENT_ID0);
+// CHECK:       wait_flag(PIPE_FIX, PIPE_MTE3, EVENT_ID0);
+// CHECK:       MSCATTER(
+
+// A narrow slice nested inside a wide one overlaps byte-for-byte
+// (contigA + contigB = 576 <= stride 1024, so the lattice check runs); the
+// direction-corrected residue test keeps the sync.
+// CHECK-LABEL: AICORE void gm_window_nested_narrow(
+// CHECK:       TSTORE(
+// CHECK:       pipe_barrier(PIPE_MTE3);
+// CHECK-NEXT:  TSTORE(
+
+// A view built on a shifted pointer (pto.addptr) gets no window at all; the
+// sync against the root-based view survives.
+// CHECK-LABEL: AICORE void gm_window_shifted_base(
+// CHECK:       TSTORE(
+// CHECK:       pipe_barrier(PIPE_FIX);
+// CHECK-NEXT:  TSTORE(
+
+// Disjoint bytes, but unaligned inside a 64-byte fixpipe burst.
+// CHECK-LABEL: AICORE void gm_window_unaligned_columns(
+// CHECK:       TSTORE(
+// CHECK:       pipe_barrier(PIPE_FIX);
+// CHECK-NEXT:  TSTORE(
+
+// Loop-carried destination: the window from the init value does not survive.
+// Re-enable with the function above once EmitC supports partition_tensor_view
+// scf.for iter_args (see #1670 note, same family as #1165).
+//   DISABLED-CHECK-LABEL: AICORE void gm_window_loop_carried(
+//   DISABLED-CHECK:       TSTORE(
+//   DISABLED-CHECK:       pipe_barrier(PIPE_FIX);
+//   DISABLED-CHECK-NEXT:  TSTORE(
+// 
